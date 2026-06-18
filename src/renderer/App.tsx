@@ -182,6 +182,7 @@ export function App() {
           fontSize={activeTheme.font.size}
           onTitle={setTitle}
           getClipboardImage={() => window.term.getClipboardImage()}
+          saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
           onCommandFinished={(_exit, durationMs) => {
             if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
               playDing();

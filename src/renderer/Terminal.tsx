@@ -31,8 +31,10 @@ export interface TerminalProps {
   onTitle?: (title: string) => void;
 
   // ---- Optional Conduit feature hooks (a minimal host may omit all of these) ----
-  /** If provided, image paste is enabled; called when clipboardData has no inline image. */
+  /** If provided, pasting at a shell prompt shows the clipboard image inline. */
   getClipboardImage?: () => Promise<string | null>;
+  /** If provided, pasting while a full-screen app runs feeds it the image as a file path. */
+  saveClipboardImageToFile?: () => Promise<string | null>;
   /** OSC 133 command-finished signal (exit code + duration in ms). */
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
@@ -176,13 +178,27 @@ export function Terminal(props: TerminalProps) {
         !e.altKey &&
         (e.key === 'v' || e.key === 'V')
       ) {
-        const getImage = propsRef.current.getClipboardImage;
-        if (getImage) {
-          void getImage()
-            .then((url) => {
-              if (url) emitImage(url);
-            })
-            .catch(() => undefined);
+        if (term.buffer.active.type === 'alternate') {
+          // A full-screen app (e.g. Claude Code) is running — feed it the pasted
+          // image as a file path it can read, rather than drawing an overlay.
+          const save = propsRef.current.saveClipboardImageToFile;
+          if (save) {
+            void save()
+              .then((p) => {
+                if (p) ptyApi.write(p);
+              })
+              .catch(() => undefined);
+          }
+        } else {
+          // At a shell prompt — show the image inline.
+          const getImage = propsRef.current.getClipboardImage;
+          if (getImage) {
+            void getImage()
+              .then((url) => {
+                if (url) emitImage(url);
+              })
+              .catch(() => undefined);
+          }
         }
       }
       return true; // always let xterm process the key (text paste still works)

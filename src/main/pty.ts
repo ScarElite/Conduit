@@ -1,5 +1,6 @@
 import * as pty from 'node-pty';
 import os from 'node:os';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { WebContents } from 'electron';
 import { IPC } from '../shared/channels';
@@ -30,8 +31,51 @@ export function resolveShellExecutable(override?: string): string {
   return override && override.trim() ? override.trim() : detectDefaultShell();
 }
 
-function pickShell(override?: string): { file: string; args: string[] } {
-  return { file: resolveShellExecutable(override), args: [] };
+function isPowerShell(file: string): boolean {
+  const base = path.basename(file).toLowerCase().replace(/\.exe$/, '');
+  return base === 'powershell' || base === 'pwsh';
+}
+
+// Injected at shell startup (PowerShell only) so OSC 133 command-completion
+// markers are ALWAYS emitted. This makes the completion ding a simple on/off
+// toggle — no $PROFILE edits, no install step, no restart. It wraps any existing
+// prompt (preserving it) and only reports a NEW history entry, so an empty Enter
+// after a long command doesn't re-ding. The marker carries the exit code and the
+// command duration (from PowerShell's own history timing):
+//   ESC ] 133 ; D ; <exit> ; <durationMs> ESC \
+const PROMPT_SETUP = String.raw`if ((Test-Path Function:\prompt) -and -not (Test-Path Function:\__Conduit_OriginalPrompt)) {
+  Rename-Item Function:\prompt __Conduit_OriginalPrompt -ErrorAction SilentlyContinue
+}
+function Global:prompt {
+  $exit = $LASTEXITCODE
+  if ($null -eq $exit) { $exit = 0 }
+  $esc = [char]27
+  $h = Get-History -Count 1 -ErrorAction SilentlyContinue
+  if ($h -and $h.Id -ne $Global:__Conduit_LastHistId) {
+    $Global:__Conduit_LastHistId = $h.Id
+    $durMs = 0
+    if ($h.EndExecutionTime -and $h.StartExecutionTime) {
+      $durMs = [int](($h.EndExecutionTime - $h.StartExecutionTime).TotalMilliseconds)
+    }
+    [Console]::Write("$esc]133;D;$exit;$durMs$esc\")
+  }
+  [Console]::Write("$esc]133;A$esc\")
+  if (Test-Path Function:\__Conduit_OriginalPrompt) {
+    return (& __Conduit_OriginalPrompt)
+  }
+  return "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) "
+}
+$__cH = Get-History -Count 1 -ErrorAction SilentlyContinue
+if ($__cH) { $Global:__Conduit_LastHistId = $__cH.Id }`;
+
+function buildShellArgs(file: string): string[] {
+  if (isPowerShell(file)) {
+    // -EncodedCommand avoids all command-line escaping; -NoExit keeps the shell
+    // interactive after the setup runs (which produces no visible output).
+    const encoded = Buffer.from(PROMPT_SETUP, 'utf16le').toString('base64');
+    return ['-NoExit', '-EncodedCommand', encoded];
+  }
+  return [];
 }
 
 /**
@@ -48,8 +92,8 @@ export function spawnPtyForContents(
   const id = contents.id;
   killPtyForContents(id);
 
-  const { file, args } = pickShell(shellOverride);
-  const proc = pty.spawn(file, args, {
+  const file = resolveShellExecutable(shellOverride);
+  const proc = pty.spawn(file, buildShellArgs(file), {
     name: 'xterm-256color',
     cols: cols > 0 ? cols : DEFAULT_COLS,
     rows: rows > 0 ? rows : DEFAULT_ROWS,

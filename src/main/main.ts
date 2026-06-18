@@ -9,11 +9,9 @@ import {
   writeToPty,
   resizePty,
   killPtyForContents,
-  resolveShellExecutable,
 } from './pty';
-import { getClipboardImage } from './clipboard';
+import { getClipboardImage, saveClipboardImageToTemp } from './clipboard';
 import { loadSettings, saveSettings } from './settings';
-import { installShellIntegration } from './shell-integration';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -52,7 +50,7 @@ function installCsp(): void {
 function createWindow(): void {
   const settings = loadSettings();
 
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1100,
     height: 720,
     minWidth: 480,
@@ -70,29 +68,32 @@ function createWindow(): void {
       autoplayPolicy: 'no-user-gesture-required', // let the completion ding play
     },
   });
+  mainWindow = win;
+  // Capture the id now — after 'closed', win.webContents is destroyed and reading
+  // it throws "Object has been destroyed".
+  const wcId = win.webContents.id;
 
-  mainWindow.setOpacity(clampOpacity(settings.windowOpacity ?? 1));
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  win.setOpacity(clampOpacity(settings.windowOpacity ?? 1));
+  win.once('ready-to-show', () => win.show());
 
-  // Surface fatal renderer problems in the main-process console.
-  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+  win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[conduit] renderer process gone:', details.reason);
   });
-  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error('[conduit] did-fail-load:', code, desc, url);
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(
+    win.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
     );
   }
 
-  mainWindow.on('closed', () => {
-    if (mainWindow) killPtyForContents(mainWindow.webContents.id);
-    mainWindow = null;
+  win.on('closed', () => {
+    killPtyForContents(wcId);
+    if (mainWindow === win) mainWindow = null;
   });
 }
 
@@ -107,19 +108,15 @@ function registerIpc(): void {
     resizePty(e.sender.id, size.cols, size.rows),
   );
 
-  // ---- clipboard image (Snipping Tool paste) ----
+  // ---- clipboard image: data URL for inline overlay, temp file for feeding a TUI ----
   ipcMain.handle(IPC.CLIPBOARD_IMAGE, () => getClipboardImage());
+  ipcMain.handle(IPC.CLIPBOARD_IMAGE_FILE, () => saveClipboardImageToTemp());
 
   // ---- settings persistence ----
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());
   ipcMain.handle(IPC.SETTINGS_SAVE, (_e, s: Settings) => {
     saveSettings(s);
   });
-
-  // ---- shell integration: target the SAME shell the pty will spawn ----
-  ipcMain.handle(IPC.SHELL_INTEGRATION_INSTALL, () =>
-    installShellIntegration(resolveShellExecutable(loadSettings().shell)),
-  );
 
   // ---- pick a custom ding sound -> data URL ----
   ipcMain.handle(IPC.PICK_SOUND, async (e) => {
@@ -155,12 +152,6 @@ function registerIpc(): void {
   });
   ipcMain.on(IPC.WINDOW_SET_OPACITY, (e, v: number) => {
     BrowserWindow.fromWebContents(e.sender)?.setOpacity(clampOpacity(v));
-  });
-
-  // ---- relaunch (activates freshly-installed shell integration) ----
-  ipcMain.on(IPC.APP_RELAUNCH, () => {
-    app.relaunch();
-    app.exit(0);
   });
 }
 

@@ -82,14 +82,6 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export type WindowControlAction = 'minimize' | 'maximize' | 'close';
 
-export interface ShellIntegrationResult {
-  ok: boolean;
-  profilePath: string;
-  /** True when the integration block was already present and got refreshed. */
-  alreadyInstalled: boolean;
-  error?: string;
-}
-
 /**
  * The narrow, typed surface exposed to the renderer on `window.term`
  * (implemented in preload via contextBridge). This is the entire IPC contract.
@@ -107,14 +99,12 @@ export interface TermBridge {
   onExit(cb: (code: number) => void): () => void;
   /** Base64 PNG data URL for the clipboard image, or null if none. */
   getClipboardImage(): Promise<string | null>;
+  /** Save the clipboard image to a temp file and return its path, or null. */
+  saveClipboardImageToFile(): Promise<string | null>;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
-  /** Append the OSC 133 shell-integration block to the user's PowerShell $PROFILE. */
-  installShellIntegration(): Promise<ShellIntegrationResult>;
   /** Open a file dialog and return the chosen sound as a data URL, or null. */
   pickSoundFile(): Promise<string | null>;
   windowControl(action: WindowControlAction): void;
   setOpacity(v: number): void;
-  /** Relaunch the app (used to activate freshly-installed shell integration). */
-  relaunchApp(): void;
 }

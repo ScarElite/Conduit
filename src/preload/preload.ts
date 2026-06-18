@@ -1,11 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC } from '../shared/channels';
-import type {
-  Settings,
-  ShellIntegrationResult,
-  TermBridge,
-  WindowControlAction,
-} from '../shared/types';
+import type { Settings, TermBridge, WindowControlAction } from '../shared/types';
 
 // The single, narrow surface the renderer can touch. Everything privileged
 // (node-pty, clipboard, fs, dialogs) lives in main; this only forwards.
@@ -32,14 +27,14 @@ const api: TermBridge = {
   getClipboardImage(): Promise<string | null> {
     return ipcRenderer.invoke(IPC.CLIPBOARD_IMAGE);
   },
+  saveClipboardImageToFile(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC.CLIPBOARD_IMAGE_FILE);
+  },
   loadSettings(): Promise<Settings> {
     return ipcRenderer.invoke(IPC.SETTINGS_LOAD);
   },
   saveSettings(s: Settings): Promise<void> {
     return ipcRenderer.invoke(IPC.SETTINGS_SAVE, s);
-  },
-  installShellIntegration(): Promise<ShellIntegrationResult> {
-    return ipcRenderer.invoke(IPC.SHELL_INTEGRATION_INSTALL);
   },
   pickSoundFile(): Promise<string | null> {
     return ipcRenderer.invoke(IPC.PICK_SOUND);
@@ -49,9 +44,6 @@ const api: TermBridge = {
   },
   setOpacity(v: number) {
     ipcRenderer.send(IPC.WINDOW_SET_OPACITY, v);
-  },
-  relaunchApp() {
-    ipcRenderer.send(IPC.APP_RELAUNCH);
   },
 };
 

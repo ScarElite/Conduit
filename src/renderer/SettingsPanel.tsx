@@ -98,8 +98,6 @@ export function SettingsPanel(props: Props) {
   } = props;
 
   const [newThemeName, setNewThemeName] = useState('');
-  const [shellMsg, setShellMsg] = useState('');
-  const [needsRestart, setNeedsRestart] = useState(false);
 
   const allThemes = getAllThemes(settings.customThemes);
   const isPresetActive = PRESETS.some((p) => p.name === settings.activeTheme);
@@ -110,18 +108,6 @@ export function SettingsPanel(props: Props) {
     onEditTheme({ ...activeTheme, chrome: { ...activeTheme.chrome, [key]: val } });
   const setFont = (patch: Partial<Theme['font']>) =>
     onEditTheme({ ...activeTheme, font: { ...activeTheme.font, ...patch } });
-
-  const installIntegration = async () => {
-    setShellMsg('Installing…');
-    const r = await window.term.installShellIntegration();
-    if (r.ok) {
-      setShellMsg(`${r.alreadyInstalled ? 'Refreshed' : 'Installed'} → ${r.profilePath}`);
-      setNeedsRestart(true);
-    } else {
-      setShellMsg(`Failed: ${r.error ?? 'unknown error'}`);
-      setNeedsRestart(false);
-    }
-  };
 
   const pickSound = async () => {
     const url = await window.term.pickSoundFile();
@@ -298,7 +284,8 @@ export function SettingsPanel(props: Props) {
               </button>
             </div>
             <p className="hint">
-              Sound: {settings.dingSound === 'builtin' ? 'built-in chime' : 'custom file'}
+              Sound: {settings.dingSound === 'builtin' ? 'built-in chime' : 'custom file'}.
+              Works automatically in PowerShell — no setup needed.
             </p>
           </section>
 
@@ -315,19 +302,7 @@ export function SettingsPanel(props: Props) {
                 onChange={(e) => onChangeSettings({ shell: e.target.value })}
               />
             </label>
-            <button className="btn" onClick={installIntegration}>
-              Install shell integration (completion ding)
-            </button>
-            {needsRestart && (
-              <button className="btn" onClick={() => window.term.relaunchApp()}>
-                Restart Conduit to activate
-              </button>
-            )}
-            {shellMsg && <p className="hint">{shellMsg}</p>}
-            <p className="hint">
-              Adds OSC 133 prompt markers to your PowerShell $PROFILE so Conduit
-              can detect when a command finishes and how long it ran.
-            </p>
+            <p className="hint">Changing the shell takes effect on the next launch.</p>
           </section>
         </div>
       </aside>
