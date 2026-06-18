@@ -60,6 +60,7 @@ function createWindow(): void {
     frame: false, // fully custom, themeable chrome (see TitleBar)
     backgroundColor: '#0a0e0a',
     show: false,
+    icon: path.join(app.getAppPath(), 'assets', 'icons', 'conduit.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, // required: isolate renderer from preload/Node

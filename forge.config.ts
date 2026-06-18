@@ -11,6 +11,7 @@ import fs from 'node:fs';
 
 const config: ForgeConfig = {
   packagerConfig: {
+    icon: 'assets/icons/conduit', // packager appends .ico (Windows) — sets the exe + taskbar icon
     // node-pty is a native module loaded via require() at runtime, so its files
     // (and the .node binary) must be unpacked out of the asar archive.
     asar: {
@@ -19,7 +20,10 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      setupIcon: 'assets/icons/conduit.ico',
+      setupExe: 'ConduitSetup.exe',
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),
