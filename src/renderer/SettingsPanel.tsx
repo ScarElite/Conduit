@@ -250,10 +250,10 @@ export function SettingsPanel(props: Props) {
                 checked={settings.dingEnabled}
                 onChange={(e) => onChangeSettings({ dingEnabled: e.target.checked })}
               />
-              <span>Play a sound when a long command finishes</span>
+              <span>Play a sound when a command or Claude Code response finishes</span>
             </label>
             <label className="field">
-              <span>Only for commands longer than (ms)</span>
+              <span>Only for shell commands longer than (ms)</span>
               <input
                 type="number"
                 min={0}

@@ -5,6 +5,17 @@ import { applyChrome, findTheme, PRESETS } from './themes';
 import type { Settings, Theme } from '../shared/types';
 import { DING_DATA_URL } from './ding-sound';
 
+// Claude Code (and many CLIs) show a braille spinner in the window title while
+// working and a non-spinner marker (e.g. ✳) when idle. A spinner -> idle title
+// transition is a reliable "task/response finished" signal, independent of focus
+// and scoped to this terminal — used to ding when Claude finishes a response.
+function isWorkingTitle(t: string): boolean {
+  const s = t.replace(/^\s+/, '');
+  if (!s) return false;
+  const c = s.codePointAt(0) ?? 0;
+  return c >= 0x2800 && c <= 0x28ff; // braille pattern block = spinner
+}
+
 function uniqueName(base: string, existing: Theme[]): string {
   const names = new Set(existing.map((t) => t.name));
   if (!names.has(base)) return base;
@@ -62,6 +73,7 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [title, setTitle] = useState('Conduit');
   const lastDing = useRef(0);
+  const wasWorking = useRef(false);
 
   // Load persisted settings before first paint of the chrome.
   useEffect(() => {
@@ -180,7 +192,13 @@ export function App() {
           theme={activeTheme.xterm}
           fontFamily={activeTheme.font.family}
           fontSize={activeTheme.font.size}
-          onTitle={setTitle}
+          onTitle={(t) => {
+            setTitle(t);
+            // Ding when a foreground app (e.g. Claude Code) goes spinner -> idle.
+            const working = isWorkingTitle(t);
+            if (wasWorking.current && !working && settings.dingEnabled) playDing();
+            wasWorking.current = working;
+          }}
           getClipboardImage={() => window.term.getClipboardImage()}
           saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
           onCommandFinished={(_exit, durationMs) => {
