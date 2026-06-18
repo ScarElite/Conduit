@@ -14,6 +14,7 @@ export const IPC = {
   PICK_SOUND: 'sound:pick', // invoke -> data URL | null
   WINDOW_CONTROL: 'window:control', // renderer -> main: minimize/maximize/close
   WINDOW_SET_OPACITY: 'window:set-opacity', // renderer -> main: number
+  APP_RELAUNCH: 'app:relaunch', // renderer -> main: relaunch the app
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

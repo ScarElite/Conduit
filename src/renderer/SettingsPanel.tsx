@@ -99,6 +99,7 @@ export function SettingsPanel(props: Props) {
 
   const [newThemeName, setNewThemeName] = useState('');
   const [shellMsg, setShellMsg] = useState('');
+  const [needsRestart, setNeedsRestart] = useState(false);
 
   const allThemes = getAllThemes(settings.customThemes);
   const isPresetActive = PRESETS.some((p) => p.name === settings.activeTheme);
@@ -114,12 +115,11 @@ export function SettingsPanel(props: Props) {
     setShellMsg('Installing…');
     const r = await window.term.installShellIntegration();
     if (r.ok) {
-      setShellMsg(
-        `${r.alreadyInstalled ? 'Refreshed' : 'Installed'} → ${r.profilePath}. ` +
-          'Open a new shell (or tab) to activate.',
-      );
+      setShellMsg(`${r.alreadyInstalled ? 'Refreshed' : 'Installed'} → ${r.profilePath}`);
+      setNeedsRestart(true);
     } else {
       setShellMsg(`Failed: ${r.error ?? 'unknown error'}`);
+      setNeedsRestart(false);
     }
   };
 
@@ -318,6 +318,11 @@ export function SettingsPanel(props: Props) {
             <button className="btn" onClick={installIntegration}>
               Install shell integration (completion ding)
             </button>
+            {needsRestart && (
+              <button className="btn" onClick={() => window.term.relaunchApp()}>
+                Restart Conduit to activate
+              </button>
+            )}
             {shellMsg && <p className="hint">{shellMsg}</p>}
             <p className="hint">
               Adds OSC 133 prompt markers to your PowerShell $PROFILE so Conduit

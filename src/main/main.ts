@@ -67,6 +67,7 @@ function createWindow(): void {
       nodeIntegration: false, // required: renderer gets no raw Node
       sandbox: false, // preload needs Node built-ins; main owns all privileged work
       spellcheck: false,
+      autoplayPolicy: 'no-user-gesture-required', // let the completion ding play
     },
   });
 
@@ -154,6 +155,12 @@ function registerIpc(): void {
   });
   ipcMain.on(IPC.WINDOW_SET_OPACITY, (e, v: number) => {
     BrowserWindow.fromWebContents(e.sender)?.setOpacity(clampOpacity(v));
+  });
+
+  // ---- relaunch (activates freshly-installed shell integration) ----
+  ipcMain.on(IPC.APP_RELAUNCH, () => {
+    app.relaunch();
+    app.exit(0);
   });
 }
 

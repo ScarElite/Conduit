@@ -51,15 +51,6 @@ interface PastedImage {
 const DEFAULT_FONT = 'Consolas, ui-monospace, monospace';
 const MAX_PASTED_IMAGES = 24;
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
 export function Terminal(props: TerminalProps) {
   const { ptyApi, theme, fontFamily = DEFAULT_FONT, fontSize = 14 } = props;
 
@@ -175,37 +166,27 @@ export function Terminal(props: TerminalProps) {
       return true; // consume — never render as text
     });
 
-    // ---- paste handling (image -> overlay; text -> default xterm paste) ----
-    const onPaste = async (ev: ClipboardEvent) => {
-      const dt = ev.clipboardData;
-      if (!dt) return;
-
-      const imageItem = Array.from(dt.items).find(
-        (it) => it.kind === 'file' && it.type.startsWith('image/'),
-      );
-      if (imageItem) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const file = imageItem.getAsFile();
-        if (file) emitImage(await fileToDataUrl(file));
-        return;
+    // ---- image paste: intercept Ctrl+V and read the OS clipboard via the host.
+    // clipboard.readImage() in main reliably reads Snipping Tool / browser bitmaps;
+    // the DOM clipboardData often doesn't surface them. Text paste is left to xterm.
+    term.attachCustomKeyEventHandler((e) => {
+      if (
+        e.type === 'keydown' &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.key === 'v' || e.key === 'V')
+      ) {
+        const getImage = propsRef.current.getClipboardImage;
+        if (getImage) {
+          void getImage()
+            .then((url) => {
+              if (url) emitImage(url);
+            })
+            .catch(() => undefined);
+        }
       }
-
-      // No inline image and no text? The clipboard may hold a bitmap Chromium
-      // didn't surface as an item (some Snipping Tool formats) — ask the host.
-      const text = dt.getData('text');
-      const getImage = propsRef.current.getClipboardImage;
-      if (!text && getImage) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const url = await getImage();
-        if (url) emitImage(url);
-        return;
-      }
-      // Otherwise: let xterm handle the normal text paste.
-    };
-    const textarea = term.textarea;
-    textarea?.addEventListener('paste', onPaste, true);
+      return true; // always let xterm process the key (text paste still works)
+    });
 
     let roRaf = 0;
     const ro = new ResizeObserver(() => {
@@ -231,7 +212,6 @@ export function Terminal(props: TerminalProps) {
       cancelAnimationFrame(rafTick);
       cancelAnimationFrame(roRaf);
       ro.disconnect();
-      textarea?.removeEventListener('paste', onPaste, true);
       offData();
       offExit?.();
       dataDisp.dispose();

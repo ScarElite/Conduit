@@ -50,6 +50,9 @@ const api: TermBridge = {
   setOpacity(v: number) {
     ipcRenderer.send(IPC.WINDOW_SET_OPACITY, v);
   },
+  relaunchApp() {
+    ipcRenderer.send(IPC.APP_RELAUNCH);
+  },
 };
 
 contextBridge.exposeInMainWorld('term', api);

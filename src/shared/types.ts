@@ -115,4 +115,6 @@ export interface TermBridge {
   pickSoundFile(): Promise<string | null>;
   windowControl(action: WindowControlAction): void;
   setOpacity(v: number): void;
+  /** Relaunch the app (used to activate freshly-installed shell integration). */
+  relaunchApp(): void;
 }

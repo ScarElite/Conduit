@@ -3,7 +3,7 @@ import { Terminal, type PtyApi } from './Terminal';
 import { SettingsPanel } from './SettingsPanel';
 import { applyChrome, findTheme, PRESETS } from './themes';
 import type { Settings, Theme } from '../shared/types';
-import dingUrl from '../../assets/sounds/ding.wav';
+import { DING_DATA_URL } from './ding-sound';
 
 function uniqueName(base: string, existing: Theme[]): string {
   const names = new Set(existing.map((t) => t.name));
@@ -106,7 +106,7 @@ export function App() {
     if (!force && now - lastDing.current < 250) return;
     lastDing.current = now;
     const url =
-      !settings || settings.dingSound === 'builtin' ? dingUrl : settings.dingSound;
+      !settings || settings.dingSound === 'builtin' ? DING_DATA_URL : settings.dingSound;
     try {
       const audio = new Audio(url);
       audio.volume = 0.6;
