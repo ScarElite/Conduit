@@ -107,6 +107,10 @@ export function Terminal(props: TerminalProps) {
     }
 
     let rafTick = 0;
+    // Heuristic for "is the bare shell prompt focused?" — true right after an
+    // OSC 133 prompt-start marker, false once the user submits a line (so a
+    // foreground app like Claude Code is running). Routes image paste.
+    let atShellPrompt = true;
     const scheduleTick = () => {
       if (rafTick) return;
       rafTick = requestAnimationFrame(() => {
@@ -141,7 +145,10 @@ export function Terminal(props: TerminalProps) {
 
     // ---- pty <-> terminal wiring ----
     const offData = ptyApi.onData((d) => term.write(d));
-    const dataDisp = term.onData((d) => ptyApi.write(d));
+    const dataDisp = term.onData((d) => {
+      if (d === '\r') atShellPrompt = false; // a line was submitted
+      ptyApi.write(d);
+    });
     const binaryDisp = term.onBinary((d) => ptyApi.write(d));
     const offExit = ptyApi.onExit?.((code) => {
       term.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
@@ -160,7 +167,9 @@ export function Terminal(props: TerminalProps) {
     // OSC 133 shell integration: 133;D;<exit>;<durationMs> => command finished.
     const oscDisp = term.parser.registerOscHandler(133, (data) => {
       const parts = data.split(';');
-      if (parts[0] === 'D') {
+      if (parts[0] === 'A') {
+        atShellPrompt = true; // shell is showing a fresh prompt
+      } else if (parts[0] === 'D') {
         const exit = parseInt(parts[1] ?? '0', 10) || 0;
         const dur = parseInt(parts[2] ?? '0', 10) || 0;
         propsRef.current.onCommandFinished?.(exit, dur);
@@ -178,14 +187,15 @@ export function Terminal(props: TerminalProps) {
         !e.altKey &&
         (e.key === 'v' || e.key === 'V')
       ) {
-        if (term.buffer.active.type === 'alternate') {
-          // A full-screen app (e.g. Claude Code) is running — feed it the pasted
-          // image as a file path it can read, rather than drawing an overlay.
+        if (!atShellPrompt) {
+          // A foreground app (e.g. Claude Code) is running — feed it the pasted
+          // image as a file path it auto-detects as an image. (Claude Code's own
+          // Windows clipboard paste is currently unreliable.)
           const save = propsRef.current.saveClipboardImageToFile;
           if (save) {
             void save()
               .then((p) => {
-                if (p) ptyApi.write(p);
+                if (p) ptyApi.write(p + ' ');
               })
               .catch(() => undefined);
           }
