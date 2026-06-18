@@ -273,9 +273,12 @@ export function SettingsPanel(props: Props) {
                 min={0}
                 step={500}
                 value={settings.dingThresholdMs}
-                onChange={(e) =>
-                  onChangeSettings({ dingThresholdMs: Number(e.target.value) })
-                }
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) {
+                    onChangeSettings({ dingThresholdMs: Math.max(0, Math.round(n)) });
+                  }
+                }}
               />
             </label>
             <div className="field-row">

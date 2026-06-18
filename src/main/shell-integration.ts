@@ -11,10 +11,11 @@ const END_MARKER = '# <<< Conduit shell integration <<<';
 
 // The body installed into the user's PowerShell $PROFILE. It wraps the existing
 // prompt (preserving it) and emits OSC 133 markers the renderer parses:
-//   133;A            -> prompt start
+//   133;A             -> prompt start
 //   133;D;<exit>;<ms> -> command finished (exit code + Conduit duration extension)
-// The duration comes straight from PowerShell's own command history timing, so
-// the renderer can ding only for commands that ran longer than a threshold.
+// The duration comes from PowerShell's own command-history timing. We only emit
+// the "D" marker for a genuinely NEW history entry (tracked by id), so pressing
+// Enter on an empty prompt doesn't re-report the previous command's duration.
 const INTEGRATION_BODY = String.raw`# Conduit OSC 133 shell integration (command-completion markers + timing).
 if ((Test-Path Function:\prompt) -and -not (Test-Path Function:\__Conduit_OriginalPrompt)) {
   Rename-Item Function:\prompt __Conduit_OriginalPrompt -ErrorAction SilentlyContinue
@@ -22,12 +23,15 @@ if ((Test-Path Function:\prompt) -and -not (Test-Path Function:\__Conduit_Origin
 function Global:prompt {
   $exit = $LASTEXITCODE
   $esc = [char]27
-  $durMs = 0
   $h = Get-History -Count 1 -ErrorAction SilentlyContinue
-  if ($h -and $h.EndExecutionTime -and $h.StartExecutionTime) {
-    $durMs = [int](($h.EndExecutionTime - $h.StartExecutionTime).TotalMilliseconds)
+  if ($h -and $h.Id -ne $Global:__Conduit_LastHistId) {
+    $Global:__Conduit_LastHistId = $h.Id
+    $durMs = 0
+    if ($h.EndExecutionTime -and $h.StartExecutionTime) {
+      $durMs = [int](($h.EndExecutionTime - $h.StartExecutionTime).TotalMilliseconds)
+    }
+    [Console]::Write("$esc]133;D;$exit;$durMs$esc\")
   }
-  [Console]::Write("$esc]133;D;$exit;$durMs$esc\")
   [Console]::Write("$esc]133;A$esc\")
   if (Test-Path Function:\__Conduit_OriginalPrompt) {
     return (& __Conduit_OriginalPrompt)
@@ -35,9 +39,14 @@ function Global:prompt {
   return "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) "
 }`;
 
-async function getProfilePath(): Promise<string> {
+function isPowerShell(shellExe: string): boolean {
+  const base = path.basename(shellExe).toLowerCase().replace(/\.exe$/, '');
+  return base === 'powershell' || base === 'pwsh';
+}
+
+async function getProfilePath(shellExe: string): Promise<string> {
   const { stdout } = await execFileAsync(
-    'powershell.exe',
+    shellExe,
     ['-NoProfile', '-NonInteractive', '-Command', '$PROFILE.CurrentUserCurrentHost'],
     { windowsHide: true },
   );
@@ -45,13 +54,25 @@ async function getProfilePath(): Promise<string> {
 }
 
 /**
- * Append (or refresh) the Conduit OSC 133 block in the user's PowerShell
- * profile. Idempotent: re-running replaces the existing guarded block rather
- * than duplicating it.
+ * Append (or refresh) the Conduit OSC 133 block in the profile of the shell
+ * Conduit actually spawns. PowerShell 7 (pwsh.exe) and Windows PowerShell 5.1
+ * (powershell.exe) use different $PROFILE paths, so we resolve the path with the
+ * same executable. Idempotent: re-running replaces the guarded block.
  */
-export async function installShellIntegration(): Promise<ShellIntegrationResult> {
+export async function installShellIntegration(
+  shellExe: string,
+): Promise<ShellIntegrationResult> {
   try {
-    const profilePath = await getProfilePath();
+    if (!isPowerShell(shellExe)) {
+      return {
+        ok: false,
+        profilePath: '',
+        alreadyInstalled: false,
+        error: `Shell integration only supports PowerShell (current shell: "${shellExe}").`,
+      };
+    }
+
+    const profilePath = await getProfilePath(shellExe);
     if (!profilePath) {
       return { ok: false, profilePath: '', alreadyInstalled: false, error: 'Could not resolve $PROFILE path.' };
     }
@@ -76,9 +97,8 @@ export async function installShellIntegration(): Promise<ShellIntegrationResult>
       const after = existing.slice(endIdx + END_MARKER.length).replace(/^\r?\n/, '');
       next = existing.slice(0, startIdx) + block + after;
     } else {
-      const needsGap = existing.length > 0;
       const prefix = existing.length > 0 && !existing.endsWith('\n') ? existing + '\n' : existing;
-      next = prefix + (needsGap ? '\n' : '') + block;
+      next = prefix + (existing.length > 0 ? '\n' : '') + block;
     }
 
     await fs.writeFile(profilePath, next, 'utf8');

@@ -178,7 +178,9 @@ body {
 
 .pasted-image {
   position: absolute;
-  pointer-events: auto;
+  /* Let wheel/clicks fall through to the terminal; only the controls below
+     re-enable pointer events. */
+  pointer-events: none;
   border: 1px solid var(--accent);
   border-radius: 5px;
   background: var(--chrome-bg);
@@ -191,6 +193,7 @@ body {
   max-height: 380px;
   border-radius: 4px;
   cursor: zoom-in;
+  pointer-events: auto;
 }
 
 .pasted-image-close {
@@ -206,6 +209,7 @@ body {
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
+  pointer-events: auto;
 }
 
 .image-modal {

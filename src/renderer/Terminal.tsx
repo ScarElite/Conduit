@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { Terminal as XTerm, type ITheme } from '@xterm/xterm';
+import { Terminal as XTerm, type ITheme, type IMarker } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -42,11 +42,14 @@ export interface TerminalProps {
 interface PastedImage {
   id: string;
   url: string;
-  /** Absolute buffer line the image is pinned to. */
-  anchorLine: number;
+  /** Live xterm marker tracking the cursor line across scrollback trims. */
+  marker: IMarker | undefined;
+  /** Fallback absolute line (used if no marker could be registered). */
+  line: number;
 }
 
 const DEFAULT_FONT = 'Consolas, ui-monospace, monospace';
+const MAX_PASTED_IMAGES = 24;
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -115,6 +118,7 @@ export function Terminal(props: TerminalProps) {
       if (rafTick) return;
       rafTick = requestAnimationFrame(() => {
         rafTick = 0;
+        if (!termRef.current) return;
         bumpTick();
       });
     };
@@ -129,9 +133,16 @@ export function Terminal(props: TerminalProps) {
 
     const emitImage = (url: string) => {
       const buf = term.buffer.active;
-      const anchorLine = buf.baseY + buf.cursorY;
+      const line = buf.baseY + buf.cursorY;
+      const marker = term.registerMarker(0); // tracks the line across trims
       const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-      setPastedImages((imgs) => [...imgs, { id, url, anchorLine }]);
+      setPastedImages((imgs) => {
+        const next = [...imgs, { id, url, marker, line }];
+        if (next.length <= MAX_PASTED_IMAGES) return next;
+        const overflow = next.length - MAX_PASTED_IMAGES;
+        next.slice(0, overflow).forEach((img) => img.marker?.dispose());
+        return next.slice(overflow);
+      });
       scheduleTick();
     };
 
@@ -196,8 +207,11 @@ export function Terminal(props: TerminalProps) {
     const textarea = term.textarea;
     textarea?.addEventListener('paste', onPaste, true);
 
+    let roRaf = 0;
     const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
+      cancelAnimationFrame(roRaf);
+      roRaf = requestAnimationFrame(() => {
+        if (!termRef.current) return; // disposed before this frame ran
         try {
           fit.fit();
         } catch {
@@ -215,6 +229,7 @@ export function Terminal(props: TerminalProps) {
 
     return () => {
       cancelAnimationFrame(rafTick);
+      cancelAnimationFrame(roRaf);
       ro.disconnect();
       textarea?.removeEventListener('paste', onPaste, true);
       offData();
@@ -246,10 +261,12 @@ export function Terminal(props: TerminalProps) {
     } catch {
       /* ignore */
     }
-    ptyApi.resize(term.cols, term.rows);
+    // Read ptyApi via propsRef so a host with a referentially-unstable PtyApi
+    // doesn't re-run this effect every render.
+    propsRef.current.ptyApi.resize(term.cols, term.rows);
     const screen = containerRef.current?.querySelector('.xterm-screen') as HTMLElement | null;
     if (screen && term.rows > 0) setCellHeight(screen.clientHeight / term.rows);
-  }, [theme, fontFamily, fontSize, ptyApi]);
+  }, [theme, fontFamily, fontSize]);
 
   // ---- compute overlay image positions for the current viewport ----
   const term = termRef.current;
@@ -258,8 +275,12 @@ export function Terminal(props: TerminalProps) {
     term && cellHeight > 0
       ? pastedImages.map((p) => {
           const buf = term.buffer.active;
-          const rowsFromTop = p.anchorLine - buf.viewportY;
-          const visible = rowsFromTop > -60 && rowsFromTop < term.rows + 2;
+          // marker.line stays in the buffer's current coordinate space (xterm
+          // decrements it as scrollback is trimmed); -1 means it trimmed away.
+          const markerLine = p.marker ? p.marker.line : p.line;
+          const line = p.marker && p.marker.line < 0 ? -1 : markerLine;
+          const rowsFromTop = line - buf.viewportY;
+          const visible = line >= 0 && rowsFromTop > -60 && rowsFromTop < term.rows + 2;
           return {
             id: p.id,
             url: p.url,
@@ -272,7 +293,10 @@ export function Terminal(props: TerminalProps) {
       : [];
 
   const removeImage = (id: string) =>
-    setPastedImages((imgs) => imgs.filter((i) => i.id !== id));
+    setPastedImages((imgs) => {
+      imgs.find((i) => i.id === id)?.marker?.dispose();
+      return imgs.filter((i) => i.id !== id);
+    });
 
   return (
     <div className="terminal-host">

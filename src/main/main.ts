@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
@@ -9,6 +9,7 @@ import {
   writeToPty,
   resizePty,
   killPtyForContents,
+  resolveShellExecutable,
 } from './pty';
 import { getClipboardImage } from './clipboard';
 import { loadSettings, saveSettings } from './settings';
@@ -23,6 +24,30 @@ let mainWindow: BrowserWindow | null = null;
 
 const clampOpacity = (v: number): number =>
   Number.isFinite(v) ? Math.min(1, Math.max(0.3, v)) : 1;
+
+// Set the Content-Security-Policy via response headers so production can be
+// strict while dev allows Vite's HMR socket + inline react-refresh preamble.
+function installCsp(): void {
+  const dev = !app.isPackaged;
+  const csp = [
+    "default-src 'self'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline'",
+    dev ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'",
+    "font-src 'self' data:",
+    dev ? "connect-src 'self' ws: wss:" : "connect-src 'self'",
+  ].join('; ');
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
+}
 
 function createWindow(): void {
   const settings = loadSettings();
@@ -89,8 +114,10 @@ function registerIpc(): void {
     saveSettings(s);
   });
 
-  // ---- shell integration (OSC 133 profile install) ----
-  ipcMain.handle(IPC.SHELL_INTEGRATION_INSTALL, () => installShellIntegration());
+  // ---- shell integration: target the SAME shell the pty will spawn ----
+  ipcMain.handle(IPC.SHELL_INTEGRATION_INSTALL, () =>
+    installShellIntegration(resolveShellExecutable(loadSettings().shell)),
+  );
 
   // ---- pick a custom ding sound -> data URL ----
   ipcMain.handle(IPC.PICK_SOUND, async (e) => {
@@ -135,9 +162,13 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (event, url) => {
     if (url !== contents.getURL()) event.preventDefault();
   });
+  contents.on('will-redirect', (event, url) => {
+    if (url !== contents.getURL()) event.preventDefault();
+  });
 });
 
 app.whenReady().then(() => {
+  installCsp();
   registerIpc();
   createWindow();
 

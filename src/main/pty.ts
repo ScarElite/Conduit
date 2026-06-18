@@ -25,9 +25,13 @@ function detectDefaultShell(): string {
   return detectedShell;
 }
 
+/** The shell executable Conduit will spawn (honors the override, else auto-detect). */
+export function resolveShellExecutable(override?: string): string {
+  return override && override.trim() ? override.trim() : detectDefaultShell();
+}
+
 function pickShell(override?: string): { file: string; args: string[] } {
-  const file = override && override.trim() ? override.trim() : detectDefaultShell();
-  return { file, args: [] };
+  return { file: resolveShellExecutable(override), args: [] };
 }
 
 /**
@@ -60,6 +64,10 @@ export function spawnPtyForContents(
   });
 
   proc.onExit(({ exitCode }) => {
+    // kill() is asynchronous, so a pty killed during respawn/reload fires its
+    // exit on a later tick — by which point the replacement already owns this
+    // id's map slot. Only the currently-mapped pty may act on its own exit.
+    if (ptys.get(id) !== proc) return;
     ptys.delete(id);
     if (!contents.isDestroyed()) contents.send(IPC.PTY_EXIT, exitCode);
   });

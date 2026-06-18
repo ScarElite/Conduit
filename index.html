@@ -2,10 +2,8 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws: wss:;"
-    />
+    <!-- Content-Security-Policy is set per-environment (strict in production,
+         relaxed for Vite HMR in dev) via response headers in the main process. -->
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Conduit</title>
   </head>
