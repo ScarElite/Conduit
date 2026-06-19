@@ -208,7 +208,13 @@ export function Terminal(props: TerminalProps) {
     const offData = ptyApi.onData((d) => term.write(d));
     const dataDisp = term.onData((d) => {
       if (d === '\r') atShellPromptRef.current = false; // a line was submitted
-      freshPromptRef.current = false; // something was typed at the prompt
+      // Clear "fresh prompt" only when a PRINTABLE character is typed (adds
+      // content to the line). Ignore escape sequences — arrow keys, and crucially
+      // the focus-report bytes xterm emits when the command/search bar steals and
+      // returns focus, which would otherwise wrongly mark the prompt non-fresh and
+      // stop the next "/" from opening the command bar.
+      const c0 = d.charCodeAt(0);
+      if (c0 >= 0x20 && c0 !== 0x7f) freshPromptRef.current = false;
       ptyApi.write(d);
     });
     const binaryDisp = term.onBinary((d) => ptyApi.write(d));
