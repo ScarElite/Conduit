@@ -1,13 +1,20 @@
 :root {
   /* Live chrome variables (Layer B) — overwritten at runtime by applyChrome().
      Defaults here are the Vlime flagship so first paint looks right. */
-  --chrome-bg: #0a0f0a;
-  --border: #2b6b1f;
-  --titlebar-fg: #a8e05f;
-  --accent: #9bff3b;
-  --panel-bg: #0d140d;
-  --panel-fg: #c5e8b7;
-  --scrollbar: #2b6b1f;
+  --chrome-bg: #080a09;
+  --border: #2c511f;
+  --titlebar-fg: #e6e7e4;
+  --accent: #70f141;
+  --panel-bg: #0e110f;
+  --panel-fg: #e6e7e4;
+  --scrollbar: #416534;
+
+  /* HUD glow intensity (Command-Center look) — set per theme by applyGlow(). */
+  --hub-glow-strength: 1;
+
+  /* Console mono for HUD chrome labels (titlebar, panel headers, buttons). */
+  --hub-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", Consolas,
+    ui-monospace, monospace;
 
   --titlebar-h: 34px;
 }
@@ -44,24 +51,74 @@ body {
 
 /* ---- App frame ---- */
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: var(--chrome-bg);
   border: 1px solid var(--border);
   overflow: hidden;
+  /* Faint accent glow hugging the inside of the window border (HUD vibe). */
+  box-shadow: inset 0 0 32px -14px
+    color-mix(
+      in srgb,
+      var(--accent) clamp(0%, calc(60% * var(--hub-glow-strength)), 100%),
+      transparent
+    );
+}
+
+/* HUD corner brackets framing the whole window like a targeting readout
+   (top-left + bottom-right — the Hub's `.hub-bracket` signature). */
+.app::before,
+.app::after {
+  content: "";
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  pointer-events: none;
+  z-index: 30;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.app::before {
+  top: 0;
+  left: 0;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.app::after {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
 }
 
 /* ---- Title bar (custom, frameless) ---- */
 .titlebar {
+  position: relative;
   display: flex;
   align-items: stretch;
   justify-content: space-between;
   height: var(--titlebar-h);
   min-height: var(--titlebar-h);
-  background: var(--chrome-bg);
+  /* Faint top accent-glow + ultra-subtle scanlines over the chrome bg (HUD). */
+  background:
+    radial-gradient(
+      120% 220% at 50% -80%,
+      color-mix(in srgb, var(--accent) calc(12% * var(--hub-glow-strength)), transparent),
+      transparent 70%
+    ),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--border) 28%, transparent) 0 1px,
+      transparent 1px 3px
+    ),
+    var(--chrome-bg);
   color: var(--titlebar-fg);
+  font-family: var(--hub-mono);
   border-bottom: 1px solid var(--border);
+  /* Glowing accent rule under the title bar. */
+  box-shadow: 0 1px 0 0
+    color-mix(in srgb, var(--accent) calc(28% * var(--hub-glow-strength)), transparent);
 }
 
 .titlebar-drag {
@@ -79,12 +136,18 @@ body {
   color: var(--accent);
   font-size: 14px;
   line-height: 1;
+  text-shadow: 0 0 10px
+    color-mix(
+      in srgb,
+      var(--accent) clamp(0%, calc(70% * var(--hub-glow-strength)), 100%),
+      transparent
+    );
 }
 
 .titlebar-title {
   font-size: 12px;
-  letter-spacing: 0.3px;
-  opacity: 0.9;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
   text-overflow: ellipsis;
   overflow: hidden;
 }
@@ -253,10 +316,35 @@ body {
   z-index: 50;
   display: flex;
   flex-direction: column;
+  box-shadow: -10px 0 30px -12px
+    color-mix(in srgb, var(--accent) calc(45% * var(--hub-glow-strength)), transparent);
 }
 
 .settings-panel.open {
   transform: translateX(0);
+}
+
+/* HUD corner brackets on the panel, matching the window frame. */
+.settings-panel::before,
+.settings-panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.settings-panel::before {
+  top: 0;
+  left: 0;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.settings-panel::after {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
 }
 
 .panel-header {
@@ -269,7 +357,10 @@ body {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 15px;
+  font-family: var(--hub-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
   color: var(--panel-fg);
 }
 
@@ -301,10 +392,13 @@ body {
 
 .panel-section h3 {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-family: var(--hub-mono);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.22em;
   color: var(--accent);
+  text-shadow: 0 0 9px
+    color-mix(in srgb, var(--accent) calc(45% * var(--hub-glow-strength)), transparent);
 }
 
 .field {
@@ -367,11 +461,21 @@ input[type="checkbox"] {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--panel-fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
   padding: 6px 11px;
+  font-family: var(--hub-mono);
   font-size: 12px;
+  letter-spacing: 0.02em;
   cursor: pointer;
   transition: background 0.12s ease;
+  /* Restrained Cyberpunk clipped corner (Hub's .hub-clip). */
+  clip-path: polygon(
+    0 0,
+    calc(100% - 7px) 0,
+    100% 7px,
+    100% 100%,
+    7px 100%,
+    0 calc(100% - 7px)
+  );
 }
 
 .btn:hover {
@@ -388,6 +492,69 @@ input[type="checkbox"] {
   font-size: 11px;
   opacity: 0.65;
   line-height: 1.45;
+}
+
+/* ---- Theme palette grid (Command-Center swatches) ---- */
+.theme-sub {
+  margin: 0 0 11px;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--chrome-bg) 55%, transparent);
+  border: 1px solid var(--border);
+  color: var(--panel-fg);
+  font-family: var(--hub-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease;
+}
+
+.swatch:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--chrome-bg));
+}
+
+.swatch.active {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 16px -4px
+      color-mix(
+        in srgb,
+        var(--accent) clamp(0%, calc(75% * var(--hub-glow-strength)), 100%),
+        transparent
+      );
+}
+
+.swatch-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 7px -1px currentColor;
+}
+
+.swatch-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Color field rows */

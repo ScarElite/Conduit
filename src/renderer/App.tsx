@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal, type PtyApi } from './Terminal';
 import { SettingsPanel } from './SettingsPanel';
-import { applyChrome, findTheme, PRESETS } from './themes';
+import { applyChrome, applyGlow, findTheme, PRESETS } from './themes';
 import type { Settings, Theme } from '../shared/types';
 import { DING_DATA_URL } from './ding-sound';
 
@@ -84,9 +84,10 @@ export function App() {
     ? findTheme(settings.activeTheme, settings.customThemes)
     : PRESETS[0];
 
-  // Layer B: push chrome colors onto the live CSS variables.
+  // Layer B: push chrome colors + HUD glow onto the live CSS variables.
   useEffect(() => {
     applyChrome(activeTheme.chrome);
+    applyGlow(activeTheme.glowStrength);
   }, [activeTheme]);
 
   // Window opacity follows the setting.

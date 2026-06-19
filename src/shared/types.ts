@@ -52,6 +52,12 @@ export interface Theme {
   xterm: XtermTheme;
   chrome: ChromeTheme;
   font: FontSettings;
+  /**
+   * Command-Center HUD glow intensity (brackets, accent glow, scanlines).
+   * Mirrors the Hub's `--hub-glow-strength`. 1 = default, 0 = off. Optional so
+   * older custom themes default to 1.
+   */
+  glowStrength?: number;
 }
 
 export interface Settings {
@@ -71,7 +77,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  activeTheme: 'Vlime',
+  activeTheme: 'Lime',
   customThemes: [],
   dingEnabled: true,
   dingThresholdMs: 5000,

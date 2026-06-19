@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ChromeTheme, Settings, Theme, XtermTheme } from '../shared/types';
-import { getAllThemes, PRESETS } from './themes';
+import { PRESETS } from './themes';
 
 interface Props {
   open: boolean;
@@ -99,7 +99,6 @@ export function SettingsPanel(props: Props) {
 
   const [newThemeName, setNewThemeName] = useState('');
 
-  const allThemes = getAllThemes(settings.customThemes);
   const isPresetActive = PRESETS.some((p) => p.name === settings.activeTheme);
 
   const setXterm = (key: keyof XtermTheme, val: string) =>
@@ -126,23 +125,48 @@ export function SettingsPanel(props: Props) {
         </header>
 
         <div className="panel-body">
-          {/* ---- Theme ---- */}
+          {/* ---- Appearance · Theme ---- */}
           <section className="panel-section">
-            <h3>Theme</h3>
-            <label className="field">
-              <span>Active theme</span>
-              <select
-                value={settings.activeTheme}
-                onChange={(e) => onChangeTheme(e.target.value)}
-              >
-                {allThemes.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
-                    {PRESETS.some((p) => p.name === t.name) ? '' : '  (custom)'}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <h3>Appearance · Theme</h3>
+            <p className="hint theme-sub">
+              Live preview — click to switch palette &amp; glow.
+            </p>
+            <div className="theme-grid">
+              {PRESETS.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  className={`swatch${t.name === activeTheme.name ? ' active' : ''}`}
+                  onClick={() => onChangeTheme(t.name)}
+                >
+                  <span
+                    className="swatch-dot"
+                    style={{ background: t.chrome.accent, color: t.chrome.accent }}
+                  />
+                  <span className="swatch-label">{t.name}</span>
+                </button>
+              ))}
+            </div>
+
+            {settings.customThemes.length > 0 && (
+              <label className="field">
+                <span>Custom themes</span>
+                <select
+                  value={isPresetActive ? '' : settings.activeTheme}
+                  onChange={(e) => {
+                    if (e.target.value) onChangeTheme(e.target.value);
+                  }}
+                >
+                  <option value="">Select a custom theme…</option>
+                  {settings.customThemes.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <div className="field-row">
               <input
                 type="text"
@@ -169,8 +193,8 @@ export function SettingsPanel(props: Props) {
               </button>
             )}
             <p className="hint">
-              Editing any color below auto-forks a custom copy, so presets stay
-              pristine.
+              Editing a color or the glow below auto-forks a custom copy (it
+              appears under Custom themes), so the palettes stay pristine.
             </p>
           </section>
 
@@ -214,6 +238,21 @@ export function SettingsPanel(props: Props) {
           {/* ---- Window chrome ---- */}
           <section className="panel-section">
             <h3>Window chrome</h3>
+            <label className="field">
+              <span>HUD glow ({Math.round((activeTheme.glowStrength ?? 1) * 100)}%)</span>
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={Math.round((activeTheme.glowStrength ?? 1) * 100)}
+                onChange={(e) =>
+                  onEditTheme({
+                    ...activeTheme,
+                    glowStrength: Number(e.target.value) / 100,
+                  })
+                }
+              />
+            </label>
             {CHROME_FIELDS.map((f) => (
               <ColorField
                 key={f.key}
