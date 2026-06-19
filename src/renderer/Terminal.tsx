@@ -3,6 +3,7 @@ import { Terminal as XTerm, type ITheme, type IMarker } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { ImageOverlay, type OverlayImage } from './ImageOverlay';
 
@@ -43,6 +44,10 @@ export interface TerminalProps {
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
   onBell?: () => void;
+  /** Font-zoom intent (Ctrl +/-, Ctrl+scroll). delta is +1 / -1 steps; the host persists the size. */
+  onZoom?: (delta: number) => void;
+  /** Reset font zoom (Ctrl+0). */
+  onResetZoom?: () => void;
 }
 
 interface PastedImage {
@@ -56,6 +61,17 @@ interface PastedImage {
 
 const DEFAULT_FONT = 'Consolas, ui-monospace, monospace';
 const MAX_PASTED_IMAGES = 24;
+
+// Warm "search highlight" decoration colors — readable on Conduit's dark themes
+// and distinct from the (often green) foreground text. Active match is brighter.
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(255, 221, 87, 0.28)',
+  matchBorder: 'rgba(255, 221, 87, 0.5)',
+  matchOverviewRuler: '#ffdd57',
+  activeMatchBackground: 'rgba(255, 162, 0, 0.55)',
+  activeMatchBorder: '#ffa200',
+  activeMatchColorOverviewRuler: '#ffa200',
+};
 
 export function Terminal(props: TerminalProps) {
   const { ptyApi, theme, fontFamily = DEFAULT_FONT, fontSize = 14 } = props;
@@ -72,6 +88,16 @@ export function Terminal(props: TerminalProps) {
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
   const [cellHeight, setCellHeight] = useState(0);
   const [, bumpTick] = useReducer((n: number) => n + 1, 0);
+
+  // ---- find-in-terminal (Ctrl+F) ----
+  const searchRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState({ index: -1, count: 0 });
+  // Latest query for the open-effect's initial search (avoids a stale closure).
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
 
   // ---- one-time terminal setup ----
   useEffect(() => {
@@ -103,6 +129,15 @@ export function Terminal(props: TerminalProps) {
     } catch {
       // WebGL2 unavailable — xterm falls back to its DOM renderer automatically.
     }
+
+    // Find-in-terminal: the addon does the searching + match decorations; the
+    // small overlay bar (rendered below) drives it.
+    const search = new SearchAddon();
+    term.loadAddon(search);
+    searchRef.current = search;
+    const searchResultsDisp = search.onDidChangeResults((r) =>
+      setSearchResults({ index: r.resultIndex, count: r.resultCount }),
+    );
 
     try {
       fit.fit();
@@ -181,16 +216,42 @@ export function Terminal(props: TerminalProps) {
       return true; // consume — never render as text
     });
 
-    // ---- image paste: intercept Ctrl+V and read the OS clipboard via the host.
-    // clipboard.readImage() in main reliably reads Snipping Tool / browser bitmaps;
-    // the DOM clipboardData often doesn't surface them. Text paste is left to xterm.
+    // Open the find bar; prefill from a single-line selection if present.
+    const openSearch = () => {
+      const sel = term.getSelection();
+      if (sel && !sel.includes('\n')) setSearchQuery(sel);
+      setSearchOpen(true);
+    };
+
+    // ---- keyboard shortcuts. Ctrl+F = find, Ctrl +/-/0 = font zoom, Ctrl+V =
+    // image paste (text paste is left to xterm). clipboard.readImage() in main
+    // reliably reads Snipping Tool / browser bitmaps the DOM often won't surface.
     term.attachCustomKeyEventHandler((e) => {
-      if (
-        e.type === 'keydown' &&
-        (e.ctrlKey || e.metaKey) &&
-        !e.altKey &&
-        (e.key === 'v' || e.key === 'V')
-      ) {
+      if (e.type !== 'keydown') return true;
+      const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
+      if (!mod) return true;
+
+      // Ctrl+F — find in terminal
+      if (!e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        openSearch();
+        return false; // don't forward to the shell
+      }
+      // Ctrl +/-/0 — font zoom (the host persists the new size)
+      if (e.key === '=' || e.key === '+') {
+        propsRef.current.onZoom?.(1);
+        return false;
+      }
+      if (e.key === '-') {
+        propsRef.current.onZoom?.(-1);
+        return false;
+      }
+      if (e.key === '0') {
+        propsRef.current.onResetZoom?.();
+        return false;
+      }
+
+      // Ctrl+V — image paste routed by shell-prompt state
+      if (e.key === 'v' || e.key === 'V') {
         if (!atShellPrompt) {
           // A foreground app (e.g. Claude Code) is running — feed it the pasted
           // image as a file path it auto-detects as an image. (Claude Code's own
@@ -214,8 +275,9 @@ export function Terminal(props: TerminalProps) {
               .catch(() => undefined);
           }
         }
+        return true; // let xterm also handle text paste
       }
-      return true; // always let xterm process the key (text paste still works)
+      return true;
     });
 
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
@@ -239,6 +301,16 @@ export function Terminal(props: TerminalProps) {
       }
     };
     container.addEventListener('contextmenu', onContextMenu);
+
+    // Ctrl + mouse wheel = font zoom (capture phase so xterm doesn't scroll).
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.deltaY < 0) propsRef.current.onZoom?.(1);
+      else if (e.deltaY > 0) propsRef.current.onZoom?.(-1);
+    };
+    container.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
     let roRaf = 0;
     const ro = new ResizeObserver(() => {
@@ -264,6 +336,7 @@ export function Terminal(props: TerminalProps) {
       cancelAnimationFrame(rafTick);
       cancelAnimationFrame(roRaf);
       container.removeEventListener('contextmenu', onContextMenu);
+      container.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
       ro.disconnect();
       offData();
       offExit?.();
@@ -274,9 +347,11 @@ export function Terminal(props: TerminalProps) {
       scrollDisp.dispose();
       renderDisp.dispose();
       oscDisp.dispose();
+      searchResultsDisp.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
     };
     // Intentionally run once: latest props are read via propsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -300,6 +375,41 @@ export function Terminal(props: TerminalProps) {
     const screen = containerRef.current?.querySelector('.xterm-screen') as HTMLElement | null;
     if (screen && term.rows > 0) setCellHeight(screen.clientHeight / term.rows);
   }, [theme, fontFamily, fontSize]);
+
+  // ---- find bar actions ----
+  const runSearch = (query: string, mode: 'next' | 'prev' | 'incremental') => {
+    const addon = searchRef.current;
+    if (!addon) return;
+    if (!query) {
+      addon.clearDecorations();
+      setSearchResults({ index: -1, count: 0 });
+      return;
+    }
+    if (mode === 'prev') addon.findPrevious(query, { decorations: SEARCH_DECORATIONS });
+    else
+      addon.findNext(query, {
+        decorations: SEARCH_DECORATIONS,
+        incremental: mode === 'incremental',
+      });
+  };
+
+  const closeSearch = () => {
+    searchRef.current?.clearDecorations();
+    setSearchOpen(false);
+    setSearchResults({ index: -1, count: 0 });
+    termRef.current?.focus();
+  };
+
+  // On open: focus + select the input, and search any prefilled (selection) text.
+  useEffect(() => {
+    if (!searchOpen) return;
+    const input = searchInputRef.current;
+    input?.focus();
+    input?.select();
+    const q = searchQueryRef.current;
+    if (q) searchRef.current?.findNext(q, { decorations: SEARCH_DECORATIONS, incremental: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen]);
 
   // ---- compute overlay image positions for the current viewport ----
   const term = termRef.current;
@@ -335,6 +445,54 @@ export function Terminal(props: TerminalProps) {
     <div className="terminal-host">
       <div className="terminal-mount" ref={containerRef} />
       <ImageOverlay images={overlayImages} onRemove={removeImage} />
+      {searchOpen && (
+        <div className="term-search">
+          <input
+            ref={searchInputRef}
+            className="term-search-input"
+            placeholder="Find"
+            spellCheck={false}
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              runSearch(e.target.value, 'incremental');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                runSearch(searchQuery, e.shiftKey ? 'prev' : 'next');
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeSearch();
+              }
+            }}
+          />
+          <span className="term-search-count">
+            {searchQuery
+              ? searchResults.count > 0
+                ? `${searchResults.index + 1}/${searchResults.count}`
+                : 'No results'
+              : ''}
+          </span>
+          <button
+            className="term-search-btn"
+            title="Previous match (Shift+Enter)"
+            onClick={() => runSearch(searchQuery, 'prev')}
+          >
+            ↑
+          </button>
+          <button
+            className="term-search-btn"
+            title="Next match (Enter)"
+            onClick={() => runSearch(searchQuery, 'next')}
+          >
+            ↓
+          </button>
+          <button className="term-search-btn" title="Close (Esc)" onClick={closeSearch}>
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

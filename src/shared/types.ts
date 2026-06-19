@@ -72,6 +72,8 @@ export interface Settings {
   dingSound: string;
   /** 1.0 = fully opaque. */
   windowOpacity: number;
+  /** Font-zoom offset (Ctrl +/-/0), added to the active theme's font size. 0 = no zoom. */
+  fontSizeOffset: number;
   /** Optional shell override (e.g. 'pwsh.exe', 'cmd.exe'). Empty = auto-detect. */
   shell?: string;
 }
@@ -83,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dingThresholdMs: 5000,
   dingSound: 'builtin',
   windowOpacity: 1,
+  fontSizeOffset: 0,
   shell: '',
 };
 

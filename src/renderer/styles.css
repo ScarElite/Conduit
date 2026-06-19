@@ -230,6 +230,75 @@ body {
   background: transparent;
 }
 
+/* ---- Find-in-terminal bar (Ctrl+F) ---- */
+.term-search {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 6px 22px -8px rgba(0, 0, 0, 0.7),
+    0 0 16px -6px
+      color-mix(in srgb, var(--accent) calc(55% * var(--hub-glow-strength)), transparent);
+  /* Match the HUD clipped-corner motif (Hub's .hub-clip). */
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+.term-search-input {
+  width: 168px;
+  background: color-mix(in srgb, var(--chrome-bg) 70%, #000 10%);
+  color: var(--panel-fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 7px;
+  font-family: var(--hub-mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.term-search-input:focus {
+  border-color: var(--accent);
+}
+
+.term-search-count {
+  min-width: 48px;
+  text-align: center;
+  font-family: var(--hub-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.term-search-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--titlebar-fg);
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.term-search-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 /* ---- Pasted-image overlay ---- */
 .image-layer {
   position: absolute;

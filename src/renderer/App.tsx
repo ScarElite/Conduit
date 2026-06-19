@@ -184,6 +184,22 @@ export function App() {
     return <div className="loading">Loading…</div>;
   }
 
+  // Font zoom is a persisted offset on top of the active theme's size, clamped to
+  // a sane range. The terminal emits +/-/reset intents; we own the persistence.
+  const FONT_MIN = 6;
+  const FONT_MAX = 40;
+  const baseFontSize = activeTheme.font.size;
+  const fontSizeOffset = settings.fontSizeOffset ?? 0;
+  const effectiveFontSize = Math.min(FONT_MAX, Math.max(FONT_MIN, baseFontSize + fontSizeOffset));
+
+  function zoomFont(delta: number) {
+    const next = Math.min(
+      FONT_MAX - baseFontSize,
+      Math.max(FONT_MIN - baseFontSize, fontSizeOffset + delta),
+    );
+    if (next !== fontSizeOffset) update({ fontSizeOffset: next });
+  }
+
   return (
     <div className="app">
       <TitleBar title={title} onToggleSettings={() => setPanelOpen((o) => !o)} />
@@ -192,7 +208,9 @@ export function App() {
           ptyApi={ptyApi}
           theme={activeTheme.xterm}
           fontFamily={activeTheme.font.family}
-          fontSize={activeTheme.font.size}
+          fontSize={effectiveFontSize}
+          onZoom={zoomFont}
+          onResetZoom={() => update({ fontSizeOffset: 0 })}
           onTitle={(t) => {
             setTitle(t);
             // Ding when a foreground app (e.g. Claude Code) goes spinner -> idle.
