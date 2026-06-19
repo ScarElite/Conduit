@@ -30,6 +30,12 @@ const api: TermBridge = {
   saveClipboardImageToFile(): Promise<string | null> {
     return ipcRenderer.invoke(IPC.CLIPBOARD_IMAGE_FILE);
   },
+  copyText(text: string) {
+    ipcRenderer.send(IPC.CLIPBOARD_WRITE_TEXT, text);
+  },
+  readClipboardText(): Promise<string> {
+    return ipcRenderer.invoke(IPC.CLIPBOARD_READ_TEXT);
+  },
   loadSettings(): Promise<Settings> {
     return ipcRenderer.invoke(IPC.SETTINGS_LOAD);
   },

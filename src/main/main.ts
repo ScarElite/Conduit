@@ -10,7 +10,12 @@ import {
   resizePty,
   killPtyForContents,
 } from './pty';
-import { getClipboardImage, saveClipboardImageToTemp } from './clipboard';
+import {
+  getClipboardImage,
+  saveClipboardImageToTemp,
+  writeClipboardText,
+  readClipboardText,
+} from './clipboard';
 import { loadSettings, saveSettings } from './settings';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -111,6 +116,10 @@ function registerIpc(): void {
   // ---- clipboard image: data URL for inline overlay, temp file for feeding a TUI ----
   ipcMain.handle(IPC.CLIPBOARD_IMAGE, () => getClipboardImage());
   ipcMain.handle(IPC.CLIPBOARD_IMAGE_FILE, () => saveClipboardImageToTemp());
+
+  // ---- clipboard text: right-click copy/paste ----
+  ipcMain.on(IPC.CLIPBOARD_WRITE_TEXT, (_e, text: string) => writeClipboardText(text));
+  ipcMain.handle(IPC.CLIPBOARD_READ_TEXT, () => readClipboardText());
 
   // ---- settings persistence ----
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());

@@ -26,3 +26,13 @@ export async function saveClipboardImageToTemp(): Promise<string | null> {
   await fs.writeFile(file, img.toPNG());
   return file;
 }
+
+/** Copies plain text to the OS clipboard — right-click copy of a terminal selection. */
+export function writeClipboardText(text: string): void {
+  clipboard.writeText(text);
+}
+
+/** Returns the OS clipboard's plain text — right-click paste into the terminal. */
+export function readClipboardText(): string {
+  return clipboard.readText();
+}

@@ -202,6 +202,8 @@ export function App() {
           }}
           getClipboardImage={() => window.term.getClipboardImage()}
           saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
+          copyText={(t) => window.term.copyText(t)}
+          readClipboardText={() => window.term.readClipboardText()}
           onCommandFinished={(_exit, durationMs) => {
             if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
               playDing();

@@ -107,6 +107,10 @@ export interface TermBridge {
   getClipboardImage(): Promise<string | null>;
   /** Save the clipboard image to a temp file and return its path, or null. */
   saveClipboardImageToFile(): Promise<string | null>;
+  /** Copy plain text to the OS clipboard (right-click copy). */
+  copyText(text: string): void;
+  /** Read plain text from the OS clipboard (right-click paste). */
+  readClipboardText(): Promise<string>;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
   /** Open a file dialog and return the chosen sound as a data URL, or null. */

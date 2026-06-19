@@ -35,6 +35,10 @@ export interface TerminalProps {
   getClipboardImage?: () => Promise<string | null>;
   /** If provided, pasting while a full-screen app runs feeds it the image as a file path. */
   saveClipboardImageToFile?: () => Promise<string | null>;
+  /** Right-click copy: copies the selection. Falls back to navigator.clipboard if omitted. */
+  copyText?: (text: string) => void;
+  /** Right-click paste: reads clipboard text. Falls back to navigator.clipboard if omitted. */
+  readClipboardText?: () => Promise<string | null>;
   /** OSC 133 command-finished signal (exit code + duration in ms). */
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
@@ -214,6 +218,28 @@ export function Terminal(props: TerminalProps) {
       return true; // always let xterm process the key (text paste still works)
     });
 
+    // ---- right-click copy/paste (console/PuTTY style): right-clicking a
+    // selection copies it (then clears it, so the next right-click pastes);
+    // right-clicking with no selection pastes the clipboard into the terminal.
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault(); // suppress the native browser menu
+      const selection = term.getSelection();
+      if (selection) {
+        const copy = propsRef.current.copyText;
+        if (copy) copy(selection);
+        else void navigator.clipboard?.writeText(selection).catch(() => undefined);
+        term.clearSelection();
+      } else {
+        const paste = (text: string | null) => {
+          if (text) term.paste(text); // honors bracketed-paste mode
+        };
+        const read = propsRef.current.readClipboardText;
+        if (read) void read().then(paste).catch(() => undefined);
+        else void navigator.clipboard?.readText().then(paste).catch(() => undefined);
+      }
+    };
+    container.addEventListener('contextmenu', onContextMenu);
+
     let roRaf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(roRaf);
@@ -237,6 +263,7 @@ export function Terminal(props: TerminalProps) {
     return () => {
       cancelAnimationFrame(rafTick);
       cancelAnimationFrame(roRaf);
+      container.removeEventListener('contextmenu', onContextMenu);
       ro.disconnect();
       offData();
       offExit?.();
