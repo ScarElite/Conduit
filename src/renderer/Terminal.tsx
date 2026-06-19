@@ -117,12 +117,13 @@ export function Terminal(props: TerminalProps) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState('');
   const [cmdIndex, setCmdIndex] = useState(0);
+  // "Is the bare shell prompt focused?" — true right after an OSC 133 prompt-start,
+  // false once a line is submitted (a foreground app like Claude Code is running).
+  // Routes image paste, and gates the command bar + its post-run echo.
+  const atShellPromptRef = useRef(true);
   // True only at a fresh, empty shell prompt — gates the bare-"/" trigger so it
   // never fires mid-line (where "/" is a real path/argument character).
   const freshPromptRef = useRef(true);
-  // Whether the bar was opened by typing "/" (vs the keybind) — decides whether
-  // Esc hands a literal "/" back to the shell.
-  const openedBySlashRef = useRef(false);
 
   // ---- one-time terminal setup ----
   useEffect(() => {
@@ -171,10 +172,6 @@ export function Terminal(props: TerminalProps) {
     }
 
     let rafTick = 0;
-    // Heuristic for "is the bare shell prompt focused?" — true right after an
-    // OSC 133 prompt-start marker, false once the user submits a line (so a
-    // foreground app like Claude Code is running). Routes image paste.
-    let atShellPrompt = true;
     const scheduleTick = () => {
       if (rafTick) return;
       rafTick = requestAnimationFrame(() => {
@@ -210,7 +207,7 @@ export function Terminal(props: TerminalProps) {
     // ---- pty <-> terminal wiring ----
     const offData = ptyApi.onData((d) => term.write(d));
     const dataDisp = term.onData((d) => {
-      if (d === '\r') atShellPrompt = false; // a line was submitted
+      if (d === '\r') atShellPromptRef.current = false; // a line was submitted
       freshPromptRef.current = false; // something was typed at the prompt
       ptyApi.write(d);
     });
@@ -233,7 +230,7 @@ export function Terminal(props: TerminalProps) {
     const oscDisp = term.parser.registerOscHandler(133, (data) => {
       const parts = data.split(';');
       if (parts[0] === 'A') {
-        atShellPrompt = true; // shell is showing a fresh prompt
+        atShellPromptRef.current = true; // shell is showing a fresh prompt
         freshPromptRef.current = true; // …and nothing typed on it yet
       } else if (parts[0] === 'D') {
         const exit = parseInt(parts[1] ?? '0', 10) || 0;
@@ -251,10 +248,8 @@ export function Terminal(props: TerminalProps) {
       setSearchOpen(true);
     };
 
-    // Open the slash command bar. `bySlash` = triggered by typing "/" at a fresh
-    // prompt (so Esc can hand the "/" back to the shell).
-    const openCommandBar = (bySlash: boolean) => {
-      openedBySlashRef.current = bySlash;
+    // Open the slash command bar.
+    const openCommandBar = () => {
       setSearchOpen(false);
       setCmdQuery('');
       setCmdIndex(0);
@@ -275,10 +270,10 @@ export function Terminal(props: TerminalProps) {
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
-        atShellPrompt &&
+        atShellPromptRef.current &&
         freshPromptRef.current
       ) {
-        openCommandBar(true);
+        openCommandBar();
         return false;
       }
 
@@ -287,7 +282,7 @@ export function Terminal(props: TerminalProps) {
 
       // Ctrl+Shift+P — open the command bar (palette-style)
       if (e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-        openCommandBar(false);
+        openCommandBar();
         return false;
       }
 
@@ -316,7 +311,7 @@ export function Terminal(props: TerminalProps) {
 
       // Ctrl+V — image paste routed by shell-prompt state
       if (e.key === 'v' || e.key === 'V') {
-        if (!atShellPrompt) {
+        if (!atShellPromptRef.current) {
           // A foreground app (e.g. Claude Code) is running — feed it the pasted
           // image as a file path it auto-detects as an image. (Claude Code's own
           // Windows clipboard paste is currently unreliable.)
@@ -509,29 +504,32 @@ export function Terminal(props: TerminalProps) {
     : allCommands;
   const cmdActive = Math.min(cmdIndex, Math.max(0, cmdFiltered.length - 1));
 
-  const closeCommandBar = (passSlash: boolean) => {
+  const closeCommandBar = () => {
     setCmdOpen(false);
     setCmdQuery('');
     setCmdIndex(0);
-    if (passSlash && openedBySlashRef.current) {
-      ptyApi.write('/'); // hand the literal "/" back to the shell
-      freshPromptRef.current = false;
-    }
     termRef.current?.focus();
   };
 
   const runCommand = (c: ConduitCommand | undefined) => {
     if (!c) return;
     c.run();
-    // "/commands" just re-lists everything; every other command dismisses the bar.
+    // "/commands" just re-lists everything — it isn't a real action.
     if (c.name === 'commands') {
       cmdInputRef.current?.focus();
-    } else {
-      setCmdOpen(false);
-      setCmdQuery('');
-      setCmdIndex(0);
-      termRef.current?.focus();
+      return;
     }
+    setCmdOpen(false);
+    setCmdQuery('');
+    setCmdIndex(0);
+    // Log what ran onto the shell line (as a no-op "#" comment) and drop to a
+    // fresh prompt — leaves a record and frees the line so the next "/" works at
+    // once. Only at a real shell prompt (never inject into a running app); and
+    // /clear is exempt since its whole purpose is a clean screen.
+    if (c.name !== 'clear' && atShellPromptRef.current) {
+      ptyApi.write(`# /${c.name}\r`);
+    }
+    termRef.current?.focus();
   };
 
   // Focus the command input whenever the bar opens.
@@ -643,7 +641,11 @@ export function Terminal(props: TerminalProps) {
                   runCommand(cmdFiltered[cmdActive]);
                 } else if (e.key === 'Escape') {
                   e.preventDefault();
-                  closeCommandBar(true);
+                  closeCommandBar();
+                } else if (e.key === 'Backspace' && cmdQuery === '') {
+                  // Backspace past the "/" (nothing else typed) dismisses the bar.
+                  e.preventDefault();
+                  closeCommandBar();
                 } else if (e.key === 'ArrowDown') {
                   e.preventDefault();
                   setCmdIndex(Math.min(cmdActive + 1, cmdFiltered.length - 1));
