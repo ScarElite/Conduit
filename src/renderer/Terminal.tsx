@@ -399,6 +399,11 @@ export function Terminal(props: TerminalProps) {
       cancelAnimationFrame(roRaf);
       roRaf = requestAnimationFrame(() => {
         if (!termRef.current) return; // disposed before this frame ran
+        // Never fit a hidden pane. An inactive tab is display:none → 0 size, and
+        // fit() doesn't bail at 0 — it clamps to xterm's 2-column minimum and
+        // resizes the pty, which corrupts any TUI (e.g. Claude Code) running in
+        // the background tab. Skip until it's visible again.
+        if (container.clientWidth === 0 || container.clientHeight === 0) return;
         try {
           fit.fit();
         } catch {
@@ -446,16 +451,22 @@ export function Terminal(props: TerminalProps) {
     term.options.theme = theme;
     term.options.fontFamily = fontFamily;
     term.options.fontSize = fontSize;
-    try {
-      fitRef.current?.fit();
-    } catch {
-      /* ignore */
+    // Only refit/resize when visible — fitting a hidden pane (inactive tab, 0 size)
+    // would shrink the pty to xterm's 2-col minimum and corrupt it. The pane
+    // refits when it next becomes active.
+    const el = containerRef.current;
+    if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+      try {
+        fitRef.current?.fit();
+      } catch {
+        /* ignore */
+      }
+      // Read ptyApi via propsRef so a host with a referentially-unstable PtyApi
+      // doesn't re-run this effect every render.
+      propsRef.current.ptyApi.resize(term.cols, term.rows);
+      const screen = el.querySelector('.xterm-screen') as HTMLElement | null;
+      if (screen && term.rows > 0) setCellHeight(screen.clientHeight / term.rows);
     }
-    // Read ptyApi via propsRef so a host with a referentially-unstable PtyApi
-    // doesn't re-run this effect every render.
-    propsRef.current.ptyApi.resize(term.cols, term.rows);
-    const screen = containerRef.current?.querySelector('.xterm-screen') as HTMLElement | null;
-    if (screen && term.rows > 0) setCellHeight(screen.clientHeight / term.rows);
   }, [theme, fontFamily, fontSize]);
 
   // When this pane becomes the active tab it may have just been un-hidden
@@ -463,15 +474,21 @@ export function Terminal(props: TerminalProps) {
   // take keyboard focus.
   useEffect(() => {
     if (!active) return;
-    const term = termRef.current;
-    if (!term) return;
-    try {
-      fitRef.current?.fit();
-    } catch {
-      /* ignore */
-    }
-    propsRef.current.ptyApi.resize(term.cols, term.rows);
-    term.focus();
+    // Defer a frame so the pane's display:block layout is settled before fitting
+    // (and skip if it's somehow still 0 — never fit to the 2-col minimum).
+    const raf = requestAnimationFrame(() => {
+      const term = termRef.current;
+      const el = containerRef.current;
+      if (!term || !el || el.clientWidth === 0 || el.clientHeight === 0) return;
+      try {
+        fitRef.current?.fit();
+      } catch {
+        /* ignore */
+      }
+      propsRef.current.ptyApi.resize(term.cols, term.rows);
+      term.focus();
+    });
+    return () => cancelAnimationFrame(raf);
   }, [active]);
 
   // ---- find bar actions ----
