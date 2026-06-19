@@ -135,10 +135,10 @@ function TabStrip({
             </button>
           </div>
         ))}
+        <button className="tab-new" title="New tab" onClick={onNew}>
+          ＋
+        </button>
       </div>
-      <button className="tab-new" title="New tab" onClick={onNew}>
-        ＋
-      </button>
     </div>
   );
 }
