@@ -21,6 +21,17 @@ export interface PtyApi {
   kill?(): void;
 }
 
+/**
+ * A Conduit-level command shown in the slash command bar. The host supplies
+ * host-specific commands (theme switch, open settings, …); the terminal adds
+ * its own built-ins (clear, …). `name` excludes the leading slash.
+ */
+export interface ConduitCommand {
+  name: string;
+  description: string;
+  run: () => void;
+}
+
 export interface TerminalProps {
   /** Required — the pty contract above. */
   ptyApi: PtyApi;
@@ -48,6 +59,8 @@ export interface TerminalProps {
   onZoom?: (delta: number) => void;
   /** Reset font zoom (Ctrl+0). */
   onResetZoom?: () => void;
+  /** Host-provided commands for the slash command bar (merged with built-ins like /clear). */
+  commands?: ConduitCommand[];
 }
 
 interface PastedImage {
@@ -98,6 +111,18 @@ export function Terminal(props: TerminalProps) {
   // Latest query for the open-effect's initial search (avoids a stale closure).
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
+
+  // ---- slash command bar (type "/" at an empty prompt, or Ctrl+Shift+P) ----
+  const cmdInputRef = useRef<HTMLInputElement>(null);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdQuery, setCmdQuery] = useState('');
+  const [cmdIndex, setCmdIndex] = useState(0);
+  // True only at a fresh, empty shell prompt — gates the bare-"/" trigger so it
+  // never fires mid-line (where "/" is a real path/argument character).
+  const freshPromptRef = useRef(true);
+  // Whether the bar was opened by typing "/" (vs the keybind) — decides whether
+  // Esc hands a literal "/" back to the shell.
+  const openedBySlashRef = useRef(false);
 
   // ---- one-time terminal setup ----
   useEffect(() => {
@@ -186,6 +211,7 @@ export function Terminal(props: TerminalProps) {
     const offData = ptyApi.onData((d) => term.write(d));
     const dataDisp = term.onData((d) => {
       if (d === '\r') atShellPrompt = false; // a line was submitted
+      freshPromptRef.current = false; // something was typed at the prompt
       ptyApi.write(d);
     });
     const binaryDisp = term.onBinary((d) => ptyApi.write(d));
@@ -208,6 +234,7 @@ export function Terminal(props: TerminalProps) {
       const parts = data.split(';');
       if (parts[0] === 'A') {
         atShellPrompt = true; // shell is showing a fresh prompt
+        freshPromptRef.current = true; // …and nothing typed on it yet
       } else if (parts[0] === 'D') {
         const exit = parseInt(parts[1] ?? '0', 10) || 0;
         const dur = parseInt(parts[2] ?? '0', 10) || 0;
@@ -220,7 +247,18 @@ export function Terminal(props: TerminalProps) {
     const openSearch = () => {
       const sel = term.getSelection();
       if (sel && !sel.includes('\n')) setSearchQuery(sel);
+      setCmdOpen(false);
       setSearchOpen(true);
+    };
+
+    // Open the slash command bar. `bySlash` = triggered by typing "/" at a fresh
+    // prompt (so Esc can hand the "/" back to the shell).
+    const openCommandBar = (bySlash: boolean) => {
+      openedBySlashRef.current = bySlash;
+      setSearchOpen(false);
+      setCmdQuery('');
+      setCmdIndex(0);
+      setCmdOpen(true);
     };
 
     // ---- keyboard shortcuts. Ctrl+F = find, Ctrl +/-/0 = font zoom, Ctrl+V =
@@ -228,8 +266,30 @@ export function Terminal(props: TerminalProps) {
     // reliably reads Snipping Tool / browser bitmaps the DOM often won't surface.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
+
+      // "/" at an empty fresh prompt opens the Conduit command bar instead of
+      // going to the shell. Anywhere else (mid-line, or an app running) it's a
+      // normal slash.
+      if (
+        e.key === '/' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        atShellPrompt &&
+        freshPromptRef.current
+      ) {
+        openCommandBar(true);
+        return false;
+      }
+
       const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
       if (!mod) return true;
+
+      // Ctrl+Shift+P — open the command bar (palette-style)
+      if (e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        openCommandBar(false);
+        return false;
+      }
 
       // Ctrl+F — find in terminal
       if (!e.shiftKey && (e.key === 'f' || e.key === 'F')) {
@@ -426,6 +486,59 @@ export function Terminal(props: TerminalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchOpen]);
 
+  // ---- slash command bar actions ----
+  // Terminal-native built-ins merged with the host's commands (theme, settings…).
+  const allCommands: ConduitCommand[] = [
+    {
+      name: 'clear',
+      description: 'Clear the terminal buffer and scrollback',
+      run: () => termRef.current?.clear(),
+    },
+    {
+      name: 'commands',
+      description: 'Show every available Conduit command',
+      run: () => {
+        setCmdQuery('');
+        setCmdIndex(0);
+      },
+    },
+    ...(props.commands ?? []),
+  ];
+  const cmdFiltered = cmdQuery
+    ? allCommands.filter((c) => c.name.toLowerCase().includes(cmdQuery.toLowerCase()))
+    : allCommands;
+  const cmdActive = Math.min(cmdIndex, Math.max(0, cmdFiltered.length - 1));
+
+  const closeCommandBar = (passSlash: boolean) => {
+    setCmdOpen(false);
+    setCmdQuery('');
+    setCmdIndex(0);
+    if (passSlash && openedBySlashRef.current) {
+      ptyApi.write('/'); // hand the literal "/" back to the shell
+      freshPromptRef.current = false;
+    }
+    termRef.current?.focus();
+  };
+
+  const runCommand = (c: ConduitCommand | undefined) => {
+    if (!c) return;
+    c.run();
+    // "/commands" just re-lists everything; every other command dismisses the bar.
+    if (c.name === 'commands') {
+      cmdInputRef.current?.focus();
+    } else {
+      setCmdOpen(false);
+      setCmdQuery('');
+      setCmdIndex(0);
+      termRef.current?.focus();
+    }
+  };
+
+  // Focus the command input whenever the bar opens.
+  useEffect(() => {
+    if (cmdOpen) cmdInputRef.current?.focus();
+  }, [cmdOpen]);
+
   // ---- compute overlay image positions for the current viewport ----
   const term = termRef.current;
   const containerWidth = containerRef.current?.clientWidth ?? 800;
@@ -506,6 +619,61 @@ export function Terminal(props: TerminalProps) {
           <button className="term-search-btn" title="Close (Esc)" onClick={closeSearch}>
             ✕
           </button>
+        </div>
+      )}
+      {cmdOpen && (
+        <div className="term-cmd">
+          <div className="term-cmd-field">
+            <span className="term-cmd-prefix">/</span>
+            <input
+              ref={cmdInputRef}
+              className="term-cmd-input"
+              placeholder="command"
+              spellCheck={false}
+              value={cmdQuery}
+              onChange={(e) => {
+                // Strip a leading "/" so typing "/clear" out of habit still matches
+                // (the slash is shown as a static prefix, not part of the query).
+                setCmdQuery(e.target.value.replace(/^\/+/, ''));
+                setCmdIndex(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  runCommand(cmdFiltered[cmdActive]);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  closeCommandBar(true);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setCmdIndex(Math.min(cmdActive + 1, cmdFiltered.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setCmdIndex(Math.max(cmdActive - 1, 0));
+                }
+              }}
+            />
+          </div>
+          <ul className="term-cmd-list">
+            {cmdFiltered.length === 0 ? (
+              <li className="term-cmd-empty">No matching command</li>
+            ) : (
+              cmdFiltered.map((c, i) => (
+                <li
+                  key={c.name}
+                  className={`term-cmd-item${i === cmdActive ? ' active' : ''}`}
+                  onMouseEnter={() => setCmdIndex(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // keep focus in the input
+                    runCommand(c);
+                  }}
+                >
+                  <span className="term-cmd-name">/{c.name}</span>
+                  <span className="term-cmd-desc">{c.description}</span>
+                </li>
+              ))
+            )}
+          </ul>
         </div>
       )}
     </div>

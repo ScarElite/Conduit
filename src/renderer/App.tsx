@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Terminal, type PtyApi } from './Terminal';
+import { Terminal, type PtyApi, type ConduitCommand } from './Terminal';
 import { SettingsPanel } from './SettingsPanel';
 import { applyChrome, applyGlow, findTheme, PRESETS } from './themes';
 import type { Settings, Theme } from '../shared/types';
@@ -200,6 +200,25 @@ export function App() {
     if (next !== fontSizeOffset) update({ fontSizeOffset: next });
   }
 
+  // Host-level commands for the slash command bar. The terminal adds its own
+  // built-ins (e.g. /clear); these are the ones that need App state.
+  const themeNames = Array.from(
+    new Set([...PRESETS.map((p) => p.name), ...settings.customThemes.map((t) => t.name)]),
+  );
+  const conduitCommands: ConduitCommand[] = [
+    {
+      name: 'settings',
+      description: 'Open the Conduit settings panel',
+      run: () => setPanelOpen(true),
+    },
+    ...themeNames.map((name) => ({
+      name: `theme ${name}`,
+      description:
+        name === settings.activeTheme ? `Theme: ${name} (active)` : `Switch theme to ${name}`,
+      run: () => update({ activeTheme: name }),
+    })),
+  ];
+
   return (
     <div className="app">
       <TitleBar title={title} onToggleSettings={() => setPanelOpen((o) => !o)} />
@@ -211,6 +230,7 @@ export function App() {
           fontSize={effectiveFontSize}
           onZoom={zoomFont}
           onResetZoom={() => update({ fontSizeOffset: 0 })}
+          commands={conduitCommands}
           onTitle={(t) => {
             setTitle(t);
             // Ding when a foreground app (e.g. Claude Code) goes spinner -> idle.

@@ -299,6 +299,106 @@ body {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
+/* ---- Slash command bar (type "/" at the prompt, or Ctrl+Shift+P) ---- */
+.term-cmd {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 460px;
+  max-width: calc(100% - 32px);
+  z-index: 25;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 18px 50px -16px rgba(0, 0, 0, 0.8),
+    0 0 22px -6px
+      color-mix(in srgb, var(--accent) calc(60% * var(--hub-glow-strength)), transparent);
+  /* HUD clipped corners (Hub's .hub-clip motif). */
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+.term-cmd-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.term-cmd-prefix {
+  font-family: var(--hub-mono);
+  font-size: 15px;
+  color: var(--accent);
+  text-shadow: 0 0 9px
+    color-mix(in srgb, var(--accent) calc(60% * var(--hub-glow-strength)), transparent);
+}
+
+.term-cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--panel-fg);
+  font-family: var(--hub-mono);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.term-cmd-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.term-cmd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 9px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.term-cmd-item.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.term-cmd-name {
+  font-family: var(--hub-mono);
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.term-cmd-desc {
+  font-size: 12px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-cmd-empty {
+  list-style: none;
+  padding: 10px 9px;
+  font-size: 12px;
+  opacity: 0.6;
+  font-family: var(--hub-mono);
+}
+
+.term-cmd-list::-webkit-scrollbar {
+  width: 9px;
+}
+.term-cmd-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 5px;
+}
+
 /* ---- Pasted-image overlay ---- */
 .image-layer {
   position: absolute;
