@@ -236,16 +236,20 @@ export function Terminal(props: TerminalProps) {
         openSearch();
         return false; // don't forward to the shell
       }
-      // Ctrl +/-/0 — font zoom (the host persists the new size)
+      // Ctrl +/-/0 — font zoom (the host persists the new size). preventDefault
+      // so the keypress can't also trigger any browser-level page zoom.
       if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
         propsRef.current.onZoom?.(1);
         return false;
       }
       if (e.key === '-') {
+        e.preventDefault();
         propsRef.current.onZoom?.(-1);
         return false;
       }
       if (e.key === '0') {
+        e.preventDefault();
         propsRef.current.onResetZoom?.();
         return false;
       }
@@ -303,12 +307,23 @@ export function Terminal(props: TerminalProps) {
     container.addEventListener('contextmenu', onContextMenu);
 
     // Ctrl + mouse wheel = font zoom (capture phase so xterm doesn't scroll).
+    // Accumulate raw deltas so one wheel notch ≈ one step and a fast scroll or
+    // trackpad burst can't slam the font straight to the size limit.
+    let wheelAccum = 0;
+    const WHEEL_STEP = 100; // ~ one mouse-wheel notch of pixel delta
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
+      e.preventDefault(); // also blocks Chromium's own Ctrl+wheel page zoom
       e.stopPropagation();
-      if (e.deltaY < 0) propsRef.current.onZoom?.(1);
-      else if (e.deltaY > 0) propsRef.current.onZoom?.(-1);
+      wheelAccum += e.deltaMode === 1 ? e.deltaY * WHEEL_STEP : e.deltaY;
+      while (wheelAccum <= -WHEEL_STEP) {
+        propsRef.current.onZoom?.(1);
+        wheelAccum += WHEEL_STEP;
+      }
+      while (wheelAccum >= WHEEL_STEP) {
+        propsRef.current.onZoom?.(-1);
+        wheelAccum -= WHEEL_STEP;
+      }
     };
     container.addEventListener('wheel', onWheel, { passive: false, capture: true });
 

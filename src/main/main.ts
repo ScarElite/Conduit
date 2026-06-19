@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
@@ -86,6 +86,14 @@ function createWindow(): void {
   });
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error('[conduit] did-fail-load:', code, desc, url);
+  });
+
+  // Lock the renderer to 100% zoom so ONLY Conduit's own font zoom changes the
+  // text size. Otherwise Ctrl +/- and Ctrl+wheel also drive Chromium's page
+  // zoom, which compounds with the font zoom and shrinks the whole UI.
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(1);
+    void win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -176,6 +184,10 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 app.whenReady().then(() => {
+  // Drop Electron's default application menu. It bound Ctrl +/-/0 to page zoom
+  // (which fought Conduit's font zoom) and Ctrl+R to "reload" (which hijacked
+  // the shell's reverse-search). The app has fully custom chrome and needs none.
+  Menu.setApplicationMenu(null);
   installCsp();
   registerIpc();
   createWindow();
