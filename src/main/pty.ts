@@ -8,9 +8,10 @@ import { IPC } from '../shared/channels';
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 30;
 
-// One pty per renderer (keyed by webContents id) so additional tabs/windows
-// can be supported later without touching this module.
-const ptys = new Map<number, pty.IPty>();
+// One pty per pane (keyed by a renderer-generated paneId) so a single window can
+// run many independent shells across tabs/splits. Each record remembers which
+// WebContents owns it, so all of a window's shells can be reaped when it closes.
+const ptys = new Map<string, { proc: pty.IPty; wcId: number }>();
 
 let detectedShell: string | null = null;
 
@@ -79,18 +80,18 @@ function buildShellArgs(file: string): string[] {
 }
 
 /**
- * Spawn a shell bound to a renderer's WebContents. Output and exit are pushed
- * straight to that renderer. Safe to call again for the same renderer (e.g.
- * after a dev reload) — any existing pty for it is killed first.
+ * Spawn a shell for one pane. Output and exit are pushed to that pane (tagged
+ * with its paneId) on the owning renderer. Safe to call again for the same
+ * paneId (e.g. after a dev reload) — any existing pty for it is killed first.
  */
-export function spawnPtyForContents(
+export function spawnPty(
+  paneId: string,
   contents: WebContents,
   cols = DEFAULT_COLS,
   rows = DEFAULT_ROWS,
   shellOverride?: string,
 ): void {
-  const id = contents.id;
-  killPtyForContents(id);
+  killPty(paneId);
 
   const file = resolveShellExecutable(shellOverride);
   const proc = pty.spawn(file, buildShellArgs(file), {
@@ -101,45 +102,58 @@ export function spawnPtyForContents(
     env: process.env as Record<string, string>,
   });
 
-  ptys.set(id, proc);
+  ptys.set(paneId, { proc, wcId: contents.id });
 
   proc.onData((data) => {
-    if (!contents.isDestroyed()) contents.send(IPC.PTY_DATA, data);
+    if (!contents.isDestroyed()) contents.send(IPC.PTY_DATA, { paneId, data });
   });
 
   proc.onExit(({ exitCode }) => {
     // kill() is asynchronous, so a pty killed during respawn/reload fires its
-    // exit on a later tick — by which point the replacement already owns this
-    // id's map slot. Only the currently-mapped pty may act on its own exit.
-    if (ptys.get(id) !== proc) return;
-    ptys.delete(id);
-    if (!contents.isDestroyed()) contents.send(IPC.PTY_EXIT, exitCode);
+    // exit on a later tick — by which point a replacement may already own this
+    // paneId's map slot. Only the currently-mapped pty may act on its own exit.
+    if (ptys.get(paneId)?.proc !== proc) return;
+    ptys.delete(paneId);
+    if (!contents.isDestroyed()) contents.send(IPC.PTY_EXIT, { paneId, code: exitCode });
   });
 }
 
-export function writeToPty(id: number, data: string): void {
-  ptys.get(id)?.write(data);
+export function writeToPty(paneId: string, data: string): void {
+  ptys.get(paneId)?.proc.write(data);
 }
 
-export function resizePty(id: number, cols: number, rows: number): void {
-  const proc = ptys.get(id);
-  if (!proc) return;
+export function resizePty(paneId: string, cols: number, rows: number): void {
+  const entry = ptys.get(paneId);
+  if (!entry) return;
   if (cols > 0 && rows > 0) {
     try {
-      proc.resize(cols, rows);
+      entry.proc.resize(cols, rows);
     } catch {
       // node-pty can throw transiently mid-teardown; the next resize corrects it.
     }
   }
 }
 
-export function killPtyForContents(id: number): void {
-  const proc = ptys.get(id);
-  if (!proc) return;
+export function killPty(paneId: string): void {
+  const entry = ptys.get(paneId);
+  if (!entry) return;
   try {
-    proc.kill();
+    entry.proc.kill();
   } catch {
     // already gone
   }
-  ptys.delete(id);
+  ptys.delete(paneId);
+}
+
+/** Reap every shell owned by a window (call when its WebContents is destroyed). */
+export function killPtysForContents(wcId: number): void {
+  for (const [paneId, entry] of ptys) {
+    if (entry.wcId !== wcId) continue;
+    try {
+      entry.proc.kill();
+    } catch {
+      // already gone
+    }
+    ptys.delete(paneId);
+  }
 }

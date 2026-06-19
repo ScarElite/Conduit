@@ -5,22 +5,30 @@ import type { Settings, TermBridge, WindowControlAction } from '../shared/types'
 // The single, narrow surface the renderer can touch. Everything privileged
 // (node-pty, clipboard, fs, dialogs) lives in main; this only forwards.
 const api: TermBridge = {
-  start(cols, rows) {
-    ipcRenderer.send(IPC.PTY_START, { cols, rows });
+  start(paneId, cols, rows) {
+    ipcRenderer.send(IPC.PTY_START, { paneId, cols, rows });
   },
-  write(data) {
-    ipcRenderer.send(IPC.PTY_WRITE, data);
+  write(paneId, data) {
+    ipcRenderer.send(IPC.PTY_WRITE, { paneId, data });
   },
-  resize(cols, rows) {
-    ipcRenderer.send(IPC.PTY_RESIZE, { cols, rows });
+  resize(paneId, cols, rows) {
+    ipcRenderer.send(IPC.PTY_RESIZE, { paneId, cols, rows });
+  },
+  killPty(paneId) {
+    ipcRenderer.send(IPC.PTY_KILL, { paneId });
+  },
+  resetPtys() {
+    ipcRenderer.send(IPC.PTY_RESET);
   },
   onData(cb) {
-    const handler = (_e: IpcRendererEvent, data: string) => cb(data);
+    const handler = (_e: IpcRendererEvent, m: { paneId: string; data: string }) =>
+      cb(m.paneId, m.data);
     ipcRenderer.on(IPC.PTY_DATA, handler);
     return () => ipcRenderer.removeListener(IPC.PTY_DATA, handler);
   },
   onExit(cb) {
-    const handler = (_e: IpcRendererEvent, code: number) => cb(code);
+    const handler = (_e: IpcRendererEvent, m: { paneId: string; code: number }) =>
+      cb(m.paneId, m.code);
     ipcRenderer.on(IPC.PTY_EXIT, handler);
     return () => ipcRenderer.removeListener(IPC.PTY_EXIT, handler);
   },

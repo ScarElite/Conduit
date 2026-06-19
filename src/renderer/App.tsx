@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal, type PtyApi, type ConduitCommand } from './Terminal';
 import { SettingsPanel } from './SettingsPanel';
 import { applyChrome, applyGlow, findTheme, PRESETS } from './themes';
@@ -22,6 +22,37 @@ function uniqueName(base: string, existing: Theme[]): string {
   let i = 2;
   while (names.has(`${base} ${i}`)) i += 1;
   return `${base} ${i}`;
+}
+
+let tabCounter = 0;
+function makeTabId(): string {
+  tabCounter += 1;
+  return `tab-${tabCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// A stable PtyApi for one tab, keyed by its paneId. Each tab owns an independent
+// shell in main; the shared onData/onExit streams are filtered to this paneId.
+function makePtyApi(paneId: string): PtyApi {
+  let started = false;
+  return {
+    onData: (cb) => window.term.onData((pid, d) => (pid === paneId ? cb(d) : undefined)),
+    onExit: (cb) => window.term.onExit((pid, c) => (pid === paneId ? cb(c) : undefined)),
+    write: (d) => window.term.write(paneId, d),
+    resize: (cols, rows) => {
+      if (!started) {
+        started = true;
+        window.term.start(paneId, cols, rows);
+      } else {
+        window.term.resize(paneId, cols, rows);
+      }
+    },
+    kill: () => window.term.killPty(paneId),
+  };
+}
+
+interface Tab {
+  id: string;
+  title: string;
 }
 
 function TitleBar({
@@ -68,12 +99,62 @@ function TitleBar({
   );
 }
 
+function TabStrip({
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+  onNew,
+}: {
+  tabs: Tab[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="tabstrip">
+      <div className="tabstrip-tabs">
+        {tabs.map((t) => (
+          <div
+            key={t.id}
+            className={`tab${t.id === activeId ? ' active' : ''}`}
+            onClick={() => onSelect(t.id)}
+            title={t.title || 'Shell'}
+          >
+            <span className="tab-title">{t.title || 'Shell'}</span>
+            <button
+              className="tab-close"
+              title="Close tab"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(t.id);
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      <button className="tab-new" title="New tab" onClick={onNew}>
+        ＋
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [title, setTitle] = useState('Conduit');
   const lastDing = useRef(0);
-  const wasWorking = useRef(false);
+
+  // ---- tabs (one independent shell per tab) ----
+  const [tabs, setTabs] = useState<Tab[]>(() => [{ id: makeTabId(), title: 'Shell' }]);
+  const [activeTabId, setActiveTabId] = useState('');
+  // Stable PtyApi per tab id (created lazily, reaped when the tab closes).
+  const ptyApisRef = useRef(new Map<string, PtyApi>());
+  // Per-tab "was the shell working?" for the spinner -> idle completion ding.
+  const wasWorkingRef = useRef(new Map<string, boolean>());
 
   // Load persisted settings before first paint of the chrome.
   useEffect(() => {
@@ -95,24 +176,14 @@ export function App() {
     if (settings) window.term.setOpacity(settings.windowOpacity);
   }, [settings?.windowOpacity]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stable PtyApi adapter over the preload bridge. The pty is spawned lazily on
-  // the first resize (which carries the real initial size).
-  const ptyApi = useMemo<PtyApi>(() => {
-    let started = false;
-    return {
-      onData: (cb) => window.term.onData(cb),
-      onExit: (cb) => window.term.onExit(cb),
-      write: (d) => window.term.write(d),
-      resize: (cols, rows) => {
-        if (!started) {
-          started = true;
-          window.term.start(cols, rows);
-        } else {
-          window.term.resize(cols, rows);
-        }
-      },
-    };
-  }, []);
+  function getPtyApi(id: string): PtyApi {
+    let api = ptyApisRef.current.get(id);
+    if (!api) {
+      api = makePtyApi(id);
+      ptyApisRef.current.set(id, api);
+    }
+    return api;
+  }
 
   function playDing(force = false) {
     const now = Date.now();
@@ -180,6 +251,36 @@ export function App() {
     persist({ ...settings, customThemes, activeTheme: activeThemeName });
   }
 
+  // The active tab id, resilient to the initial empty state / a closed active tab.
+  const activeId = tabs.some((t) => t.id === activeTabId) ? activeTabId : tabs[0]?.id ?? '';
+
+  function newTab() {
+    const id = makeTabId();
+    setTabs((ts) => [...ts, { id, title: 'Shell' }]);
+    setActiveTabId(id);
+  }
+
+  function closeTab(id: string) {
+    window.term.killPty(id);
+    ptyApisRef.current.delete(id);
+    wasWorkingRef.current.delete(id);
+    const idx = tabs.findIndex((t) => t.id === id);
+    const next = tabs.filter((t) => t.id !== id);
+    if (next.length === 0) {
+      // Closing the final tab closes the window (matches browsers / Windows Terminal).
+      window.term.windowControl('close');
+      return;
+    }
+    if (id === activeId) {
+      setActiveTabId(next[Math.min(idx, next.length - 1)].id);
+    }
+    setTabs(next);
+  }
+
+  function setTabTitle(id: string, title: string) {
+    setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, title } : t)));
+  }
+
   if (!settings) {
     return <div className="loading">Loading…</div>;
   }
@@ -206,6 +307,8 @@ export function App() {
     new Set([...PRESETS.map((p) => p.name), ...settings.customThemes.map((t) => t.name)]),
   );
   const conduitCommands: ConduitCommand[] = [
+    { name: 'new-tab', description: 'Open a new tab', run: () => newTab() },
+    { name: 'close-tab', description: 'Close the current tab', run: () => closeTab(activeId) },
     {
       name: 'settings',
       description: 'Open the Conduit settings panel',
@@ -219,38 +322,60 @@ export function App() {
     })),
   ];
 
+  const windowTitle = tabs.find((t) => t.id === activeId)?.title || 'Conduit';
+
   return (
     <div className="app">
-      <TitleBar title={title} onToggleSettings={() => setPanelOpen((o) => !o)} />
+      <TitleBar title={windowTitle} onToggleSettings={() => setPanelOpen((o) => !o)} />
+      <TabStrip
+        tabs={tabs}
+        activeId={activeId}
+        onSelect={setActiveTabId}
+        onClose={closeTab}
+        onNew={newTab}
+      />
       <div className="terminal-area">
-        <Terminal
-          ptyApi={ptyApi}
-          theme={activeTheme.xterm}
-          fontFamily={activeTheme.font.family}
-          fontSize={effectiveFontSize}
-          onZoom={zoomFont}
-          onResetZoom={() => update({ fontSizeOffset: 0 })}
-          commands={conduitCommands}
-          onTitle={(t) => {
-            setTitle(t);
-            // Ding when a foreground app (e.g. Claude Code) goes spinner -> idle.
-            const working = isWorkingTitle(t);
-            if (wasWorking.current && !working && settings.dingEnabled) playDing();
-            wasWorking.current = working;
-          }}
-          getClipboardImage={() => window.term.getClipboardImage()}
-          saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
-          copyText={(t) => window.term.copyText(t)}
-          readClipboardText={() => window.term.readClipboardText()}
-          onCommandFinished={(_exit, durationMs) => {
-            if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
-              playDing();
-            }
-          }}
-          onBell={() => {
-            if (settings.dingEnabled) playDing();
-          }}
-        />
+        {tabs.map((t) => {
+          const isActive = t.id === activeId;
+          return (
+            <div
+              key={t.id}
+              className="tab-pane"
+              style={{ display: isActive ? 'block' : 'none' }}
+            >
+              <Terminal
+                ptyApi={getPtyApi(t.id)}
+                active={isActive}
+                theme={activeTheme.xterm}
+                fontFamily={activeTheme.font.family}
+                fontSize={effectiveFontSize}
+                onZoom={zoomFont}
+                onResetZoom={() => update({ fontSizeOffset: 0 })}
+                commands={conduitCommands}
+                onTitle={(title) => {
+                  setTabTitle(t.id, title);
+                  // Ding when any tab's foreground app goes spinner -> idle.
+                  const working = isWorkingTitle(title);
+                  const prev = wasWorkingRef.current.get(t.id) ?? false;
+                  if (prev && !working && settings.dingEnabled) playDing();
+                  wasWorkingRef.current.set(t.id, working);
+                }}
+                getClipboardImage={() => window.term.getClipboardImage()}
+                saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
+                copyText={(txt) => window.term.copyText(txt)}
+                readClipboardText={() => window.term.readClipboardText()}
+                onCommandFinished={(_exit, durationMs) => {
+                  if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
+                    playDing();
+                  }
+                }}
+                onBell={() => {
+                  if (settings.dingEnabled) playDing();
+                }}
+              />
+            </div>
+          );
+        })}
       </div>
       <SettingsPanel
         open={panelOpen}

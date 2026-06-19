@@ -61,6 +61,8 @@ export interface TerminalProps {
   onResetZoom?: () => void;
   /** Host-provided commands for the slash command bar (merged with built-ins like /clear). */
   commands?: ConduitCommand[];
+  /** True when this pane is the visible/active tab — triggers a refit + focus. */
+  active?: boolean;
 }
 
 interface PastedImage {
@@ -87,7 +89,7 @@ const SEARCH_DECORATIONS = {
 };
 
 export function Terminal(props: TerminalProps) {
-  const { ptyApi, theme, fontFamily = DEFAULT_FONT, fontSize = 14 } = props;
+  const { ptyApi, theme, fontFamily = DEFAULT_FONT, fontSize = 14, active = false } = props;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -455,6 +457,22 @@ export function Terminal(props: TerminalProps) {
     const screen = containerRef.current?.querySelector('.xterm-screen') as HTMLElement | null;
     if (screen && term.rows > 0) setCellHeight(screen.clientHeight / term.rows);
   }, [theme, fontFamily, fontSize]);
+
+  // When this pane becomes the active tab it may have just been un-hidden
+  // (display:none → real size). Refit to the now-correct size, sync the pty, and
+  // take keyboard focus.
+  useEffect(() => {
+    if (!active) return;
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      fitRef.current?.fit();
+    } catch {
+      /* ignore */
+    }
+    propsRef.current.ptyApi.resize(term.cols, term.rows);
+    term.focus();
+  }, [active]);
 
   // ---- find bar actions ----
   const runSearch = (query: string, mode: 'next' | 'prev' | 'incremental') => {

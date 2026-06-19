@@ -96,16 +96,20 @@ export type WindowControlAction = 'minimize' | 'maximize' | 'close';
  * (implemented in preload via contextBridge). This is the entire IPC contract.
  */
 export interface TermBridge {
-  /** Ask main to spawn the shell at the given initial size. Call once, after xterm is ready. */
-  start(cols: number, rows: number): void;
-  /** Send keystrokes / pasted text to the shell. */
-  write(data: string): void;
-  /** Tell the shell the viewport size changed. */
-  resize(cols: number, rows: number): void;
-  /** Subscribe to shell output. Returns an unsubscribe function. */
-  onData(cb: (data: string) => void): () => void;
-  /** Subscribe to shell exit. Returns an unsubscribe function. */
-  onExit(cb: (code: number) => void): () => void;
+  /** Ask main to spawn a pane's shell at the given initial size. Call once per pane. */
+  start(paneId: string, cols: number, rows: number): void;
+  /** Send keystrokes / pasted text to a pane's shell. */
+  write(paneId: string, data: string): void;
+  /** Tell a pane's shell the viewport size changed. */
+  resize(paneId: string, cols: number, rows: number): void;
+  /** Kill a pane's shell (its tab/pane was closed). */
+  killPty(paneId: string): void;
+  /** Reap every shell this window owns — call once on (re)load, before spawning panes. */
+  resetPtys(): void;
+  /** Subscribe to every pane's shell output (cb receives the paneId). Returns unsubscribe. */
+  onData(cb: (paneId: string, data: string) => void): () => void;
+  /** Subscribe to every pane's shell exit (cb receives the paneId). Returns unsubscribe. */
+  onExit(cb: (paneId: string, code: number) => void): () => void;
   /** Base64 PNG data URL for the clipboard image, or null if none. */
   getClipboardImage(): Promise<string | null>;
   /** Save the clipboard image to a temp file and return its path, or null. */

@@ -2,11 +2,15 @@
 // sides can never drift out of sync.
 
 export const IPC = {
-  PTY_START: 'pty:start', // renderer -> main: spawn shell at initial size
-  PTY_DATA: 'pty:data', // main -> renderer: shell output
-  PTY_EXIT: 'pty:exit', // main -> renderer: shell exited
-  PTY_WRITE: 'pty:write', // renderer -> main: keystrokes / pasted text
-  PTY_RESIZE: 'pty:resize', // renderer -> main: viewport resized
+  // All pty messages carry a { paneId, ... } payload so one window can run many
+  // independent shells (one per tab/pane).
+  PTY_START: 'pty:start', // renderer -> main: spawn shell { paneId, cols, rows }
+  PTY_DATA: 'pty:data', // main -> renderer: shell output { paneId, data }
+  PTY_EXIT: 'pty:exit', // main -> renderer: shell exited { paneId, code }
+  PTY_WRITE: 'pty:write', // renderer -> main: keystrokes/pasted text { paneId, data }
+  PTY_RESIZE: 'pty:resize', // renderer -> main: viewport resized { paneId, cols, rows }
+  PTY_KILL: 'pty:kill', // renderer -> main: kill a shell { paneId } (tab closed)
+  PTY_RESET: 'pty:reset', // renderer -> main: reap all this window's shells (on (re)load)
   CLIPBOARD_IMAGE: 'clipboard:image', // invoke -> data URL | null
   CLIPBOARD_IMAGE_FILE: 'clipboard:image-file', // invoke -> temp file path | null
   CLIPBOARD_WRITE_TEXT: 'clipboard:write-text', // renderer -> main: copy text to clipboard

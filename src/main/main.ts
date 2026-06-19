@@ -6,10 +6,11 @@ import started from 'electron-squirrel-startup';
 import { IPC } from '../shared/channels';
 import type { Settings, WindowControlAction } from '../shared/types';
 import {
-  spawnPtyForContents,
+  spawnPty,
   writeToPty,
   resizePty,
-  killPtyForContents,
+  killPty,
+  killPtysForContents,
 } from './pty';
 import {
   getClipboardImage,
@@ -144,21 +145,26 @@ function createWindow(): void {
   }
 
   win.on('closed', () => {
-    killPtyForContents(wcId);
+    killPtysForContents(wcId);
     if (mainWindow === win) mainWindow = null;
   });
 }
 
 function registerIpc(): void {
   // ---- pty lifecycle (the standalone host's PtyApi implementation) ----
-  ipcMain.on(IPC.PTY_START, (e, size: { cols: number; rows: number }) => {
+  ipcMain.on(IPC.PTY_START, (e, m: { paneId: string; cols: number; rows: number }) => {
     const settings = loadSettings();
-    spawnPtyForContents(e.sender, size?.cols, size?.rows, settings.shell);
+    spawnPty(m.paneId, e.sender, m?.cols, m?.rows, settings.shell);
   });
-  ipcMain.on(IPC.PTY_WRITE, (e, data: string) => writeToPty(e.sender.id, data));
-  ipcMain.on(IPC.PTY_RESIZE, (e, size: { cols: number; rows: number }) =>
-    resizePty(e.sender.id, size.cols, size.rows),
+  ipcMain.on(IPC.PTY_WRITE, (_e, m: { paneId: string; data: string }) =>
+    writeToPty(m.paneId, m.data),
   );
+  ipcMain.on(IPC.PTY_RESIZE, (_e, m: { paneId: string; cols: number; rows: number }) =>
+    resizePty(m.paneId, m.cols, m.rows),
+  );
+  ipcMain.on(IPC.PTY_KILL, (_e, m: { paneId: string }) => killPty(m.paneId));
+  // A (re)loaded renderer reaps the shells it orphaned, before spawning new panes.
+  ipcMain.on(IPC.PTY_RESET, (e) => killPtysForContents(e.sender.id));
 
   // ---- clipboard image: data URL for inline overlay, temp file for feeding a TUI ----
   ipcMain.handle(IPC.CLIPBOARD_IMAGE, () => getClipboardImage());
