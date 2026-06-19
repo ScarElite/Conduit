@@ -273,6 +273,10 @@ export function Terminal(props: TerminalProps) {
         atShellPromptRef.current &&
         freshPromptRef.current
       ) {
+        // preventDefault so the "/" isn't also typed into xterm's hidden textarea
+        // (returning false stops xterm's own handling but not that insertion) —
+        // otherwise a stray "/" reaches the shell and clears the fresh-prompt flag.
+        e.preventDefault();
         openCommandBar();
         return false;
       }
