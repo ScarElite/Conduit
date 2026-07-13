@@ -350,8 +350,15 @@ export function Terminal(props: TerminalProps) {
       });
     };
 
-    // ---- keyboard shortcuts. Ctrl+F = find, Ctrl +/-/0 = font zoom, Ctrl+V =
-    // clipboard paste (text, or image when there's no text).
+    const copyToClipboard = (text: string) => {
+      const copy = propsRef.current.copyText;
+      if (copy) copy(text);
+      else void navigator.clipboard?.writeText(text).catch(() => undefined);
+    };
+
+    // ---- keyboard shortcuts. Ctrl+C = copy selection (else interrupt), Ctrl+F =
+    // find, Ctrl +/-/0 = font zoom, Ctrl+V = clipboard paste (text, or image
+    // when there's no text).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
 
@@ -401,6 +408,17 @@ export function Terminal(props: TerminalProps) {
         return false;
       }
 
+      // Ctrl+C — with a selection: copy it and clear the highlight (Windows
+      // Terminal behavior; the GUI habit for "copy what I highlighted"). With
+      // no selection it stays the shell interrupt. Pressing it twice therefore
+      // still interrupts: the first press consumes the selection.
+      if (!e.shiftKey && (e.key === 'c' || e.key === 'C') && term.hasSelection()) {
+        e.preventDefault();
+        copyToClipboard(term.getSelection());
+        term.clearSelection();
+        return false; // don't send ^C to the shell
+      }
+
       // Ctrl+F — find in terminal
       if (!e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         openSearch();
@@ -434,12 +452,6 @@ export function Terminal(props: TerminalProps) {
       }
       return true;
     });
-
-    const copyToClipboard = (text: string) => {
-      const copy = propsRef.current.copyText;
-      if (copy) copy(text);
-      else void navigator.clipboard?.writeText(text).catch(() => undefined);
-    };
 
     // ---- copy-on-select, deferred to focus-leave: a highlight lands on the OS
     // clipboard at the first moment it could be pasted elsewhere — when focus
