@@ -1,7 +1,7 @@
 {
   "name": "conduit",
   "productName": "Conduit",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A custom, fully themeable terminal emulator for Windows. Also ships an embeddable React <Terminal/> component (lib/) for V's Command Hub.",
   "main": ".vite/build/main.js",
   "module": "./lib/conduit-terminal.js",

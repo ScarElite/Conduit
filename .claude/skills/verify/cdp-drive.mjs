@@ -97,6 +97,20 @@ if (action === 'focus') {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', x, y, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x, y, clickCount: 1 });
   console.log(`clicked ${x},${y}`);
+} else if (action === 'drag') {
+  // drag "x1,y1,x2,y2" — left-button drag (e.g. select text in the terminal)
+  const [x1, y1, x2, y2] = arg.split(',').map(Number);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1, y: y1 });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', x: x1, y: y1, clickCount: 1, buttons: 1 });
+  const steps = 8;
+  for (let i = 1; i <= steps; i++) {
+    const x = x1 + ((x2 - x1) * i) / steps;
+    const y = y1 + ((y2 - y1) * i) / steps;
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', x, y, buttons: 1 });
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x: x2, y: y2, clickCount: 1 });
+  console.log(`dragged ${x1},${y1} -> ${x2},${y2}`);
 } else if (action === 'shot') {
   const r = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(arg, Buffer.from(r.data, 'base64'));

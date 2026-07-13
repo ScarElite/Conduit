@@ -47,7 +47,7 @@ export interface TerminalProps {
   getClipboardImage?: () => Promise<string | null>;
   /** If provided, pasting while a full-screen app runs feeds it the image as a file path. */
   saveClipboardImageToFile?: () => Promise<string | null>;
-  /** Right-click copy: copies the selection. Falls back to navigator.clipboard if omitted. */
+  /** Copies a selection (copy-on-select and right-click). Falls back to navigator.clipboard if omitted. */
   copyText?: (text: string) => void;
   /** Right-click paste: reads clipboard text. Falls back to navigator.clipboard if omitted. */
   readClipboardText?: () => Promise<string | null>;
@@ -427,6 +427,21 @@ export function Terminal(props: TerminalProps) {
       return true;
     });
 
+    const copyToClipboard = (text: string) => {
+      const copy = propsRef.current.copyText;
+      if (copy) copy(text);
+      else void navigator.clipboard?.writeText(text).catch(() => undefined);
+    };
+
+    // ---- copy-on-select (PuTTY style): highlighting text copies it straight to
+    // the OS clipboard, so it can be pasted outside the terminal with no explicit
+    // copy step. Skips the empty event clearSelection fires so clearing a
+    // selection never clobbers the clipboard.
+    const selectionDisp = term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) copyToClipboard(selection);
+    });
+
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
     // selection copies it (then clears it, so the next right-click pastes);
     // right-clicking with no selection pastes the clipboard — text or image —
@@ -435,9 +450,7 @@ export function Terminal(props: TerminalProps) {
       e.preventDefault(); // suppress the native browser menu
       const selection = term.getSelection();
       if (selection) {
-        const copy = propsRef.current.copyText;
-        if (copy) copy(selection);
-        else void navigator.clipboard?.writeText(selection).catch(() => undefined);
+        copyToClipboard(selection);
         term.clearSelection();
       } else {
         pasteClipboard();
@@ -505,6 +518,7 @@ export function Terminal(props: TerminalProps) {
       bellDisp.dispose();
       scrollDisp.dispose();
       renderDisp.dispose();
+      selectionDisp.dispose();
       oscDisp.dispose();
       searchResultsDisp.dispose();
       term.dispose();
