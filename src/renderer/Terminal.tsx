@@ -129,6 +129,26 @@ export function Terminal(props: TerminalProps) {
   // never fires mid-line (where "/" is a real path/argument character).
   const freshPromptRef = useRef(true);
 
+  // ---- scroll navigation (overlay buttons + Ctrl+Shift+Home/↑/End) ----
+  // Marks the line of the last submitted input (Enter sent to the pty). Input-
+  // driven rather than OSC 133 so it works inside TUIs like Claude Code too.
+  const lastPromptMarkerRef = useRef<IMarker | null>(null);
+  const jumpToTop = () => {
+    termRef.current?.scrollToTop();
+    termRef.current?.focus();
+  };
+  const jumpToBottom = () => {
+    termRef.current?.scrollToBottom();
+    termRef.current?.focus();
+  };
+  const jumpToLastPrompt = () => {
+    const t = termRef.current;
+    const m = lastPromptMarkerRef.current;
+    if (!t || !m || m.line < 0) return;
+    t.scrollToLine(m.line);
+    t.focus();
+  };
+
   // ---- one-time terminal setup ----
   useEffect(() => {
     const container = containerRef.current;
@@ -220,7 +240,13 @@ export function Terminal(props: TerminalProps) {
     // ---- pty <-> terminal wiring ----
     const offData = ptyApi.onData((d) => term.write(d));
     const dataDisp = term.onData((d) => {
-      if (d === '\r') atShellPromptRef.current = false; // a line was submitted
+      if (d === '\r') {
+        atShellPromptRef.current = false; // a line was submitted
+        // Remember where — "jump to last prompt" scrolls back to this line.
+        lastPromptMarkerRef.current?.dispose();
+        lastPromptMarkerRef.current = term.registerMarker(0) ?? null;
+        scheduleTick();
+      }
       // Clear "fresh prompt" only when a PRINTABLE character is typed (adds
       // content to the line). Ignore escape sequences — arrow keys, and crucially
       // the focus-report bytes xterm emits when the command/search bar steals and
@@ -346,6 +372,24 @@ export function Terminal(props: TerminalProps) {
       // Ctrl+Shift+P — open the command bar (palette-style)
       if (e.shiftKey && (e.key === 'p' || e.key === 'P')) {
         openCommandBar();
+        return false;
+      }
+
+      // Ctrl+Shift+Home/End/↑/↓ — scroll navigation: top, bottom, last prompt.
+      // (Plain Ctrl+Home/End stay with the shell — PSReadLine binds them.)
+      if (e.shiftKey && e.key === 'Home') {
+        e.preventDefault();
+        jumpToTop();
+        return false;
+      }
+      if (e.shiftKey && (e.key === 'End' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        jumpToBottom();
+        return false;
+      }
+      if (e.shiftKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        jumpToLastPrompt();
         return false;
       }
 
@@ -640,10 +684,53 @@ export function Terminal(props: TerminalProps) {
       return imgs.filter((i) => i.id !== id);
     });
 
+  // ---- scroll-nav visibility (fresh each render: onScroll/onRender bumpTick) ----
+  const navBuf = term?.buffer.active;
+  const scrolledUp = !!navBuf && navBuf.viewportY < navBuf.baseY;
+  const atTop = !navBuf || navBuf.viewportY <= 0;
+  const promptMarker = lastPromptMarkerRef.current;
+  const promptLine = promptMarker && promptMarker.line >= 0 ? promptMarker.line : -1;
+  const promptOffscreen =
+    !!term &&
+    !!navBuf &&
+    promptLine >= 0 &&
+    (promptLine < navBuf.viewportY || promptLine >= navBuf.viewportY + term.rows);
+
   return (
     <div className="terminal-host">
       <div className="terminal-mount" ref={containerRef} />
       <ImageOverlay images={overlayImages} onRemove={removeImage} />
+      {(scrolledUp || promptOffscreen) && (
+        <div className="term-nav">
+          {!atTop && (
+            <button
+              className="term-nav-btn"
+              title="Jump to top (Ctrl+Shift+Home)"
+              onClick={jumpToTop}
+            >
+              ⤒
+            </button>
+          )}
+          {promptOffscreen && (
+            <button
+              className="term-nav-btn term-nav-btn-prompt"
+              title="Jump to last prompt (Ctrl+Shift+↑)"
+              onClick={jumpToLastPrompt}
+            >
+              ❯
+            </button>
+          )}
+          {scrolledUp && (
+            <button
+              className="term-nav-btn"
+              title="Jump to bottom (Ctrl+Shift+End)"
+              onClick={jumpToBottom}
+            >
+              ⤓
+            </button>
+          )}
+        </div>
+      )}
       {searchOpen && (
         <div className="term-search">
           <input

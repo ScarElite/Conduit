@@ -65,6 +65,31 @@ if (action === 'focus') {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'right', x, y, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'right', x, y, clickCount: 1 });
   console.log(`right-clicked ${Math.round(x)},${Math.round(y)}`);
+} else if (action === 'ctrlc') {
+  await key('rawKeyDown', 'Control', 'ControlLeft', 17, 2);
+  await key('rawKeyDown', 'c', 'KeyC', 67, 2);
+  await key('keyUp', 'c', 'KeyC', 67, 2);
+  await key('keyUp', 'Control', 'ControlLeft', 17, 0);
+  console.log('sent ctrl+c');
+} else if (action === 'csk') {
+  // Ctrl+Shift+<Home|End|ArrowUp|ArrowDown>
+  const vk = { Home: 36, End: 35, ArrowUp: 38, ArrowDown: 40 }[arg];
+  const mods = 2 | 8; // Ctrl | Shift
+  await key('rawKeyDown', 'Control', 'ControlLeft', 17, 2);
+  await key('rawKeyDown', 'Shift', 'ShiftLeft', 16, mods);
+  await key('rawKeyDown', arg, arg, vk, mods);
+  await key('keyUp', arg, arg, vk, mods);
+  await key('keyUp', 'Shift', 'ShiftLeft', 16, 2);
+  await key('keyUp', 'Control', 'ControlLeft', 17, 0);
+  console.log('sent ctrl+shift+' + arg);
+} else if (action === 'wheel') {
+  const r = await send('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.xterm-screen') || document.body; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
+    returnByValue: true,
+  });
+  const { x, y } = r.result.value;
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: Number(arg) });
+  console.log(`wheel ${arg}`);
 } else if (action === 'click') {
   const [x, y] = arg.split(',').map(Number);
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });

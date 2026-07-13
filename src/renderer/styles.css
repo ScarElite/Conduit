@@ -408,6 +408,48 @@ body {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
+/* ---- Scroll-nav cluster (appears when scrolled up / last prompt off screen) ---- */
+.term-nav {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.term-nav-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--titlebar-fg);
+  background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.7);
+  /* Match the HUD clipped-corner motif (Hub's .hub-clip). */
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.term-nav-btn:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel-bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.term-nav-btn-prompt {
+  color: var(--accent);
+}
+
 /* ---- Slash command bar (type "/" at the prompt, or Ctrl+Shift+P) ---- */
 .term-cmd {
   position: absolute;
