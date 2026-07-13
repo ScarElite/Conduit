@@ -441,14 +441,17 @@ export function Terminal(props: TerminalProps) {
       else void navigator.clipboard?.writeText(text).catch(() => undefined);
     };
 
-    // ---- copy-on-select (PuTTY style): highlighting text copies it straight to
-    // the OS clipboard, so it can be pasted outside the terminal with no explicit
-    // copy step. Skips the empty event clearSelection fires so clearing a
-    // selection never clobbers the clipboard.
-    const selectionDisp = term.onSelectionChange(() => {
+    // ---- copy-on-select, deferred to focus-leave: a highlight lands on the OS
+    // clipboard at the first moment it could be pasted elsewhere — when focus
+    // leaves the terminal. Copying at selection time instead would clobber the
+    // clipboard when text is highlighted only to be deleted/retyped: any
+    // keystroke clears the selection, which cancels the copy.
+    const copySelectionOnLeave = () => {
       const selection = term.getSelection();
       if (selection) copyToClipboard(selection);
-    });
+    };
+    window.addEventListener('blur', copySelectionOnLeave);
+    term.textarea?.addEventListener('blur', copySelectionOnLeave);
 
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
     // selection copies it (then clears it, so the next right-click pastes);
@@ -526,7 +529,8 @@ export function Terminal(props: TerminalProps) {
       bellDisp.dispose();
       scrollDisp.dispose();
       renderDisp.dispose();
-      selectionDisp.dispose();
+      window.removeEventListener('blur', copySelectionOnLeave);
+      term.textarea?.removeEventListener('blur', copySelectionOnLeave);
       oscDisp.dispose();
       searchResultsDisp.dispose();
       term.dispose();

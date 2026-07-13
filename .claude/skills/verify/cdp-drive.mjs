@@ -97,6 +97,24 @@ if (action === 'focus') {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', x, y, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x, y, clickCount: 1 });
   console.log(`clicked ${x},${y}`);
+} else if (action === 'backspace') {
+  const n = Number(arg ?? 1);
+  for (let i = 0; i < n; i++) {
+    await key('rawKeyDown', 'Backspace', 'Backspace', 8, 0);
+    await key('keyUp', 'Backspace', 'Backspace', 8, 0);
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  console.log(`sent ${n} backspaces`);
+} else if (action === 'dblclick') {
+  // dblclick "x,y" — double left click (word-select in xterm)
+  const [x, y] = arg.split(',').map(Number);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  for (const clickCount of [1, 2]) {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', x, y, clickCount });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x, y, clickCount });
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  console.log(`double-clicked ${x},${y}`);
 } else if (action === 'drag') {
   // drag "x1,y1,x2,y2" — left-button drag (e.g. select text in the terminal)
   const [x1, y1, x2, y2] = arg.split(',').map(Number);
