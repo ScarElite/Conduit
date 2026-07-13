@@ -305,7 +305,15 @@ export function Terminal(props: TerminalProps) {
     // the terminal; when the clipboard holds no text, an image routes by
     // shell-prompt state. clipboard.readImage() in main reliably reads Snipping
     // Tool / browser bitmaps the DOM often won't surface.
+    //
+    // Deduped: mice/drivers that double-fire the trigger events (a hardware
+    // double right-click, a utility synthesizing Ctrl+V on right-click) would
+    // otherwise paste twice. No intentional re-paste happens this fast.
+    let lastPasteAt = 0;
     const pasteClipboard = () => {
+      const now = performance.now();
+      if (now - lastPasteAt < 300) return;
+      lastPasteAt = now;
       const read = propsRef.current.readClipboardText;
       const textRead: Promise<string | null> = read
         ? read().catch(() => null)
