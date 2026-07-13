@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, Menu, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { appendFileSync } from 'node:fs';
@@ -24,6 +24,13 @@ import { loadSettings, saveSettings } from './settings';
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
+}
+
+// Dev/test escape hatch: point this instance at its own user-data dir so it can
+// run side-by-side with an installed Conduit (the single-instance lock below is
+// keyed on the userData path, so this also scopes the lock).
+if (process.env.CONDUIT_USER_DATA) {
+  app.setPath('userData', process.env.CONDUIT_USER_DATA);
 }
 
 // Single-instance guard: a second launch focuses the existing window instead of
@@ -189,6 +196,14 @@ function registerIpc(): void {
   // ---- clipboard text: right-click copy/paste ----
   ipcMain.on(IPC.CLIPBOARD_WRITE_TEXT, (_e, text: string) => writeClipboardText(text));
   ipcMain.handle(IPC.CLIPBOARD_READ_TEXT, () => readClipboardText());
+
+  // ---- terminal link click -> default browser. http(s) only: never let a
+  // pty-controlled URL reach ShellExecute with file:/smb/custom-protocol power.
+  ipcMain.on(IPC.OPEN_EXTERNAL, (_e, url: string) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      void shell.openExternal(url).catch(() => undefined);
+    }
+  });
 
   // ---- settings persistence ----
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());

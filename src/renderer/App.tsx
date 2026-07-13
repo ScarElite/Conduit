@@ -364,6 +364,7 @@ export function App() {
                 saveClipboardImageToFile={() => window.term.saveClipboardImageToFile()}
                 copyText={(txt) => window.term.copyText(txt)}
                 readClipboardText={() => window.term.readClipboardText()}
+                openLink={(url) => window.term.openExternal(url)}
                 onCommandFinished={(_exit, durationMs) => {
                   if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
                     playDing();

@@ -118,6 +118,8 @@ export interface TermBridge {
   copyText(text: string): void;
   /** Read plain text from the OS clipboard (right-click paste). */
   readClipboardText(): Promise<string>;
+  /** Open an http(s) URL in the user's default browser (terminal link click). */
+  openExternal(url: string): void;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
   /** Open a file dialog and return the chosen sound as a data URL, or null. */

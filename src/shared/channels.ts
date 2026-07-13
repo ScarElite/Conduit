@@ -15,6 +15,7 @@ export const IPC = {
   CLIPBOARD_IMAGE_FILE: 'clipboard:image-file', // invoke -> temp file path | null
   CLIPBOARD_WRITE_TEXT: 'clipboard:write-text', // renderer -> main: copy text to clipboard
   CLIPBOARD_READ_TEXT: 'clipboard:read-text', // invoke -> clipboard text (string)
+  OPEN_EXTERNAL: 'shell:open-external', // renderer -> main: open an http(s) URL in the default browser
   SETTINGS_LOAD: 'settings:load', // invoke -> Settings
   SETTINGS_SAVE: 'settings:save', // invoke(Settings) -> void
   PICK_SOUND: 'sound:pick', // invoke -> data URL | null

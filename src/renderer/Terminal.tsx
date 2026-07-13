@@ -51,6 +51,8 @@ export interface TerminalProps {
   copyText?: (text: string) => void;
   /** Right-click paste: reads clipboard text. Falls back to navigator.clipboard if omitted. */
   readClipboardText?: () => Promise<string | null>;
+  /** Click on a URL: opens it (e.g. in the default browser). Falls back to window.open. */
+  openLink?: (url: string) => void;
   /** OSC 133 command-finished signal (exit code + duration in ms). */
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
@@ -146,7 +148,16 @@ export function Terminal(props: TerminalProps) {
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    // Link activation must go through the host: the addon's default window.open
+    // is denied by main's setWindowOpenHandler, so a bare WebLinksAddon() makes
+    // link clicks silently do nothing.
+    term.loadAddon(
+      new WebLinksAddon((_e, uri) => {
+        const open = propsRef.current.openLink;
+        if (open) open(uri);
+        else window.open(uri, '_blank', 'noopener');
+      }),
+    );
     term.open(container);
 
     // GPU renderer with graceful fallback to the DOM renderer on context loss.
@@ -265,8 +276,9 @@ export function Terminal(props: TerminalProps) {
     };
 
     // ---- keyboard shortcuts. Ctrl+F = find, Ctrl +/-/0 = font zoom, Ctrl+V =
-    // image paste (text paste is left to xterm). clipboard.readImage() in main
-    // reliably reads Snipping Tool / browser bitmaps the DOM often won't surface.
+    // clipboard paste (text, or image when there's no text). clipboard.readImage()
+    // in main reliably reads Snipping Tool / browser bitmaps the DOM often won't
+    // surface.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
 
@@ -321,32 +333,47 @@ export function Terminal(props: TerminalProps) {
         return false;
       }
 
-      // Ctrl+V — image paste routed by shell-prompt state
+      // Ctrl+V — clipboard paste. Text pastes into the terminal; when the
+      // clipboard holds no text, an image routes by shell-prompt state. xterm
+      // never pastes on Ctrl+V itself (it would encode it as 0x16 for the
+      // shell), so the whole paste is handled here.
       if (e.key === 'v' || e.key === 'V') {
-        if (!atShellPromptRef.current) {
-          // A foreground app (e.g. Claude Code) is running — feed it the pasted
-          // image as a file path it auto-detects as an image. (Claude Code's own
-          // Windows clipboard paste is currently unreliable.)
-          const save = propsRef.current.saveClipboardImageToFile;
-          if (save) {
-            void save()
-              .then((p) => {
-                if (p) ptyApi.write(p + ' ');
-              })
-              .catch(() => undefined);
+        e.preventDefault();
+        const read = propsRef.current.readClipboardText;
+        const textRead: Promise<string | null> = read
+          ? read().catch(() => null)
+          : navigator.clipboard?.readText().catch(() => null) ??
+            Promise.resolve(null);
+        void textRead.then((text) => {
+          if (text) {
+            term.paste(text); // honors bracketed-paste mode
+            return;
           }
-        } else {
-          // At a shell prompt — show the image inline.
-          const getImage = propsRef.current.getClipboardImage;
-          if (getImage) {
-            void getImage()
-              .then((url) => {
-                if (url) emitImage(url);
-              })
-              .catch(() => undefined);
+          if (!atShellPromptRef.current) {
+            // A foreground app (e.g. Claude Code) is running — feed it the pasted
+            // image as a file path it auto-detects as an image. (Claude Code's own
+            // Windows clipboard paste is currently unreliable.)
+            const save = propsRef.current.saveClipboardImageToFile;
+            if (save) {
+              void save()
+                .then((p) => {
+                  if (p) ptyApi.write(p + ' ');
+                })
+                .catch(() => undefined);
+            }
+          } else {
+            // At a shell prompt — show the image inline.
+            const getImage = propsRef.current.getClipboardImage;
+            if (getImage) {
+              void getImage()
+                .then((url) => {
+                  if (url) emitImage(url);
+                })
+                .catch(() => undefined);
+            }
           }
-        }
-        return true; // let xterm also handle text paste
+        });
+        return false; // fully handled — don't let xterm send 0x16 to the shell
       }
       return true;
     });
