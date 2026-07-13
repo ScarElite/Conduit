@@ -275,10 +275,49 @@ export function Terminal(props: TerminalProps) {
       setCmdOpen(true);
     };
 
+    // Shared paste routing (Ctrl+V and right-click): clipboard text pastes into
+    // the terminal; when the clipboard holds no text, an image routes by
+    // shell-prompt state. clipboard.readImage() in main reliably reads Snipping
+    // Tool / browser bitmaps the DOM often won't surface.
+    const pasteClipboard = () => {
+      const read = propsRef.current.readClipboardText;
+      const textRead: Promise<string | null> = read
+        ? read().catch(() => null)
+        : navigator.clipboard?.readText().catch(() => null) ??
+          Promise.resolve(null);
+      void textRead.then((text) => {
+        if (text) {
+          term.paste(text); // honors bracketed-paste mode
+          return;
+        }
+        if (!atShellPromptRef.current) {
+          // A foreground app (e.g. Claude Code) is running — feed it the pasted
+          // image as a file path it auto-detects as an image. (Claude Code's own
+          // Windows clipboard paste is currently unreliable.)
+          const save = propsRef.current.saveClipboardImageToFile;
+          if (save) {
+            void save()
+              .then((p) => {
+                if (p) ptyApi.write(p + ' ');
+              })
+              .catch(() => undefined);
+          }
+        } else {
+          // At a shell prompt — show the image inline.
+          const getImage = propsRef.current.getClipboardImage;
+          if (getImage) {
+            void getImage()
+              .then((url) => {
+                if (url) emitImage(url);
+              })
+              .catch(() => undefined);
+          }
+        }
+      });
+    };
+
     // ---- keyboard shortcuts. Ctrl+F = find, Ctrl +/-/0 = font zoom, Ctrl+V =
-    // clipboard paste (text, or image when there's no text). clipboard.readImage()
-    // in main reliably reads Snipping Tool / browser bitmaps the DOM often won't
-    // surface.
+    // clipboard paste (text, or image when there's no text).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
 
@@ -333,46 +372,12 @@ export function Terminal(props: TerminalProps) {
         return false;
       }
 
-      // Ctrl+V — clipboard paste. Text pastes into the terminal; when the
-      // clipboard holds no text, an image routes by shell-prompt state. xterm
-      // never pastes on Ctrl+V itself (it would encode it as 0x16 for the
-      // shell), so the whole paste is handled here.
+      // Ctrl+V — clipboard paste. xterm never pastes on Ctrl+V itself (it
+      // would encode it as 0x16 for the shell), so the whole paste is
+      // handled here.
       if (e.key === 'v' || e.key === 'V') {
         e.preventDefault();
-        const read = propsRef.current.readClipboardText;
-        const textRead: Promise<string | null> = read
-          ? read().catch(() => null)
-          : navigator.clipboard?.readText().catch(() => null) ??
-            Promise.resolve(null);
-        void textRead.then((text) => {
-          if (text) {
-            term.paste(text); // honors bracketed-paste mode
-            return;
-          }
-          if (!atShellPromptRef.current) {
-            // A foreground app (e.g. Claude Code) is running — feed it the pasted
-            // image as a file path it auto-detects as an image. (Claude Code's own
-            // Windows clipboard paste is currently unreliable.)
-            const save = propsRef.current.saveClipboardImageToFile;
-            if (save) {
-              void save()
-                .then((p) => {
-                  if (p) ptyApi.write(p + ' ');
-                })
-                .catch(() => undefined);
-            }
-          } else {
-            // At a shell prompt — show the image inline.
-            const getImage = propsRef.current.getClipboardImage;
-            if (getImage) {
-              void getImage()
-                .then((url) => {
-                  if (url) emitImage(url);
-                })
-                .catch(() => undefined);
-            }
-          }
-        });
+        pasteClipboard();
         return false; // fully handled — don't let xterm send 0x16 to the shell
       }
       return true;
@@ -380,7 +385,8 @@ export function Terminal(props: TerminalProps) {
 
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
     // selection copies it (then clears it, so the next right-click pastes);
-    // right-clicking with no selection pastes the clipboard into the terminal.
+    // right-clicking with no selection pastes the clipboard — text or image —
+    // exactly like Ctrl+V.
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault(); // suppress the native browser menu
       const selection = term.getSelection();
@@ -390,12 +396,7 @@ export function Terminal(props: TerminalProps) {
         else void navigator.clipboard?.writeText(selection).catch(() => undefined);
         term.clearSelection();
       } else {
-        const paste = (text: string | null) => {
-          if (text) term.paste(text); // honors bracketed-paste mode
-        };
-        const read = propsRef.current.readClipboardText;
-        if (read) void read().then(paste).catch(() => undefined);
-        else void navigator.clipboard?.readText().then(paste).catch(() => undefined);
+        pasteClipboard();
       }
     };
     container.addEventListener('contextmenu', onContextMenu);
