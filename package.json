@@ -1,7 +1,7 @@
 {
   "name": "conduit",
   "productName": "Conduit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A custom, fully themeable terminal emulator for Windows. Also ships an embeddable React <Terminal/> component (lib/) for V's Command Hub.",
   "main": ".vite/build/main.js",
   "module": "./lib/conduit-terminal.js",
@@ -30,6 +30,10 @@
     "email": "mra0211@gmail.com"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ScarElite/Conduit.git"
+  },
   "peerDependencies": {
     "react": "^19",
     "react-dom": "^19"
@@ -43,6 +47,7 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
     "@electron-forge/plugin-fuses": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.11.2",
+    "@electron-forge/publisher-github": "^7.11.2",
     "@electron/fuses": "^1.8.0",
     "@electron/rebuild": "^4.0.4",
     "@types/electron-squirrel-startup": "^1.0.2",
@@ -71,6 +76,7 @@
     "@xterm/xterm": "^6.0.0",
     "electron-squirrel-startup": "^1.0.1",
     "electron-store": "^8.2.0",
-    "node-pty": "1.1.0"
+    "node-pty": "1.1.0",
+    "update-electron-app": "^3.3.0"
   }
 }

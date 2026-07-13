@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { appendFileSync } from 'node:fs';
 import started from 'electron-squirrel-startup';
+import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import { IPC } from '../shared/channels';
 import type { Settings, WindowControlAction } from '../shared/types';
 import {
@@ -32,6 +33,21 @@ if (started) {
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
+}
+
+// Silent auto-update from GitHub Releases (served via update.electronjs.org).
+// Checks on launch and every 10 minutes, downloads in the background, and the
+// new version takes over on the NEXT launch — notifyUser: false suppresses the
+// restart prompt, so a live session is never interrupted. No-ops in dev
+// (unpackaged) builds and quitting secondary instances.
+if (gotSingleInstanceLock) {
+  updateElectronApp({
+    updateSource: {
+      type: UpdateSourceType.ElectronPublicUpdateService,
+      repo: 'ScarElite/Conduit',
+    },
+    notifyUser: false,
+  });
 }
 
 let mainWindow: BrowserWindow | null = null;

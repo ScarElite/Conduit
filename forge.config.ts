@@ -3,6 +3,7 @@ import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
+import { PublisherGithub } from '@electron-forge/publisher-github';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
@@ -27,6 +28,18 @@ const config: ForgeConfig = {
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),
+  ],
+  publishers: [
+    // `npm run publish` uploads the Squirrel artifacts (RELEASES, .nupkg,
+    // ConduitSetup.exe) to a GitHub Release tagged v<version>. Installed apps
+    // pull updates from that release via update.electronjs.org, which only
+    // serves public repos with published (non-draft) releases.
+    new PublisherGithub({
+      repository: { owner: 'ScarElite', name: 'Conduit' },
+      draft: false,
+      prerelease: false,
+      generateReleaseNotes: true,
+    }),
   ],
   hooks: {
     // The Vite plugin bundles the app and excludes node_modules from the copied
