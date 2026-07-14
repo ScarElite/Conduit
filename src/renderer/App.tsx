@@ -57,9 +57,11 @@ interface Tab {
 
 function TitleBar({
   title,
+  version,
   onToggleSettings,
 }: {
   title: string;
+  version: string;
   onToggleSettings: () => void;
 }) {
   return (
@@ -67,6 +69,7 @@ function TitleBar({
       <div className="titlebar-drag">
         <span className="titlebar-logo">▮</span>
         <span className="titlebar-title">{title || 'Conduit'}</span>
+        {version && <span className="titlebar-version">v{version}</span>}
       </div>
       <div className="titlebar-actions">
         <button className="tb-btn" title="Settings" onClick={onToggleSettings}>
@@ -146,6 +149,7 @@ function TabStrip({
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
   const lastDing = useRef(0);
 
   // ---- tabs (one independent shell per tab) ----
@@ -159,6 +163,7 @@ export function App() {
   // Load persisted settings before first paint of the chrome.
   useEffect(() => {
     window.term.loadSettings().then(setSettings);
+    window.term.getAppVersion().then(setAppVersion);
   }, []);
 
   const activeTheme = settings
@@ -326,7 +331,11 @@ export function App() {
 
   return (
     <div className="app">
-      <TitleBar title={windowTitle} onToggleSettings={() => setPanelOpen((o) => !o)} />
+      <TitleBar
+        title={windowTitle}
+        version={appVersion}
+        onToggleSettings={() => setPanelOpen((o) => !o)}
+      />
       <TabStrip
         tabs={tabs}
         activeId={activeId}

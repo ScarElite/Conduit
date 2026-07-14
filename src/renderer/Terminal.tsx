@@ -47,7 +47,7 @@ export interface TerminalProps {
   getClipboardImage?: () => Promise<string | null>;
   /** If provided, pasting while a full-screen app runs feeds it the image as a file path. */
   saveClipboardImageToFile?: () => Promise<string | null>;
-  /** Copies a selection (copy-on-select and right-click). Falls back to navigator.clipboard if omitted. */
+  /** Copies a selection (Ctrl+C / right-click). Falls back to navigator.clipboard if omitted. */
   copyText?: (text: string) => void;
   /** Right-click paste: reads clipboard text. Falls back to navigator.clipboard if omitted. */
   readClipboardText?: () => Promise<string | null>;
@@ -453,24 +453,19 @@ export function Terminal(props: TerminalProps) {
       return true;
     });
 
-    // ---- copy-on-select, deferred to focus-leave: a highlight lands on the OS
-    // clipboard at the first moment it could be pasted elsewhere — when focus
-    // leaves the terminal. Copying at selection time instead would clobber the
-    // clipboard when text is highlighted only to be deleted/retyped: any
-    // keystroke clears the selection, which cancels the copy.
-    const copySelectionOnLeave = () => {
-      const selection = term.getSelection();
-      if (selection) copyToClipboard(selection);
-    };
-    window.addEventListener('blur', copySelectionOnLeave);
-    term.textarea?.addEventListener('blur', copySelectionOnLeave);
-
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
     // selection copies it (then clears it, so the next right-click pastes);
     // right-clicking with no selection pastes the clipboard — text or image —
-    // exactly like Ctrl+V.
+    // exactly like Ctrl+V. Copying is always this explicit (right-click or
+    // Ctrl+C) — there is deliberately NO copy-on-select.
+    //
+    // Capture phase + stopPropagation: xterm's own contextmenu listener (on an
+    // inner element) must never run — it moves its hidden textarea under the
+    // cursor and stuffs/selects the selection text in it to serve the native
+    // menu, which is suppressed here anyway.
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault(); // suppress the native browser menu
+      e.stopPropagation();
       const selection = term.getSelection();
       if (selection) {
         copyToClipboard(selection);
@@ -479,7 +474,22 @@ export function Terminal(props: TerminalProps) {
         pasteClipboard();
       }
     };
-    container.addEventListener('contextmenu', onContextMenu);
+    container.addEventListener('contextmenu', onContextMenu, { capture: true });
+
+    // ---- native paste events, funneled through the same deduped path. xterm
+    // registers its own 'paste' listeners (on its element AND hidden textarea)
+    // that insert clipboard text directly — a second, un-deduped paste path.
+    // Anything that synthesizes a paste (mouse-driver gestures, clipboard
+    // utilities, an OS paste command) would land BOTH there and on a
+    // right-click/Ctrl+V trigger → the double paste. Intercept before xterm
+    // sees it and route through pasteClipboard, whose dedupe makes it a no-op
+    // when a normal trigger already fired.
+    const onNativePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation(); // never reaches xterm's own paste handlers
+      pasteClipboard();
+    };
+    container.addEventListener('paste', onNativePaste, { capture: true });
 
     // Ctrl + mouse wheel = font zoom (capture phase so xterm doesn't scroll).
     // Accumulate raw deltas so one wheel notch ≈ one step and a fast scroll or
@@ -530,7 +540,12 @@ export function Terminal(props: TerminalProps) {
     return () => {
       cancelAnimationFrame(rafTick);
       cancelAnimationFrame(roRaf);
-      container.removeEventListener('contextmenu', onContextMenu);
+      container.removeEventListener('contextmenu', onContextMenu, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener('paste', onNativePaste, {
+        capture: true,
+      } as EventListenerOptions);
       container.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
       ro.disconnect();
       offData();
@@ -541,8 +556,6 @@ export function Terminal(props: TerminalProps) {
       bellDisp.dispose();
       scrollDisp.dispose();
       renderDisp.dispose();
-      window.removeEventListener('blur', copySelectionOnLeave);
-      term.textarea?.removeEventListener('blur', copySelectionOnLeave);
       oscDisp.dispose();
       searchResultsDisp.dispose();
       term.dispose();

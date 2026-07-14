@@ -120,6 +120,8 @@ export interface TermBridge {
   readClipboardText(): Promise<string>;
   /** Open an http(s) URL in the user's default browser (terminal link click). */
   openExternal(url: string): void;
+  /** The installed app's version (package.json version via app.getVersion()). */
+  getAppVersion(): Promise<string>;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
   /** Open a file dialog and return the chosen sound as a data URL, or null. */

@@ -16,6 +16,7 @@ export const IPC = {
   CLIPBOARD_WRITE_TEXT: 'clipboard:write-text', // renderer -> main: copy text to clipboard
   CLIPBOARD_READ_TEXT: 'clipboard:read-text', // invoke -> clipboard text (string)
   OPEN_EXTERNAL: 'shell:open-external', // renderer -> main: open an http(s) URL in the default browser
+  APP_VERSION: 'app:version', // invoke -> app version string (e.g. "1.0.7")
   SETTINGS_LOAD: 'settings:load', // invoke -> Settings
   SETTINGS_SAVE: 'settings:save', // invoke(Settings) -> void
   PICK_SOUND: 'sound:pick', // invoke -> data URL | null

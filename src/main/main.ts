@@ -205,6 +205,9 @@ function registerIpc(): void {
     }
   });
 
+  // ---- app version (shown in the title bar so update state is checkable at a glance) ----
+  ipcMain.handle(IPC.APP_VERSION, () => app.getVersion());
+
   // ---- settings persistence ----
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());
   ipcMain.handle(IPC.SETTINGS_SAVE, (_e, s: Settings) => {

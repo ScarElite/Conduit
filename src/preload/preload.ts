@@ -47,6 +47,9 @@ const api: TermBridge = {
   openExternal(url: string) {
     ipcRenderer.send(IPC.OPEN_EXTERNAL, url);
   },
+  getAppVersion(): Promise<string> {
+    return ipcRenderer.invoke(IPC.APP_VERSION);
+  },
   loadSettings(): Promise<Settings> {
     return ipcRenderer.invoke(IPC.SETTINGS_LOAD);
   },
