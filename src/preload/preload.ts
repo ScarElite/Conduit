@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC } from '../shared/channels';
-import type { Settings, TermBridge, WindowControlAction } from '../shared/types';
+import type { Settings, TermBridge, UpdateStatus, WindowControlAction } from '../shared/types';
 
 // The single, narrow surface the renderer can touch. Everything privileged
 // (node-pty, clipboard, fs, dialogs) lives in main; this only forwards.
@@ -49,6 +49,17 @@ const api: TermBridge = {
   },
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC.APP_VERSION);
+  },
+  checkForUpdate(): Promise<UpdateStatus> {
+    return ipcRenderer.invoke(IPC.UPDATE_CHECK);
+  },
+  onUpdateStatus(cb) {
+    const handler = (_e: IpcRendererEvent, status: UpdateStatus) => cb(status);
+    ipcRenderer.on(IPC.UPDATE_STATUS, handler);
+    return () => ipcRenderer.removeListener(IPC.UPDATE_STATUS, handler);
+  },
+  restartToUpdate() {
+    ipcRenderer.send(IPC.UPDATE_RESTART);
   },
   loadSettings(): Promise<Settings> {
     return ipcRenderer.invoke(IPC.SETTINGS_LOAD);

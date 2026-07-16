@@ -129,6 +129,15 @@ if (action === 'focus') {
   }
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x: x2, y: y2, clickCount: 1 });
   console.log(`dragged ${x1},${y1} -> ${x2},${y2}`);
+} else if (action === 'type') {
+  // type "text" — per-char key events with text payloads (reaches xterm's
+  // custom key handler AND inserts into a focused DOM input, like real typing)
+  for (const ch of arg) {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: ch });
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  console.log(`typed ${arg}`);
 } else if (action === 'shot') {
   const r = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(arg, Buffer.from(r.data, 'base64'));

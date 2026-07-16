@@ -47,7 +47,7 @@ export interface TerminalProps {
   getClipboardImage?: () => Promise<string | null>;
   /** If provided, pasting while a full-screen app runs feeds it the image as a file path. */
   saveClipboardImageToFile?: () => Promise<string | null>;
-  /** Copies a selection (Ctrl+C / right-click). Falls back to navigator.clipboard if omitted. */
+  /** Copies a selection (copy-on-select, Ctrl+C, right-click). Falls back to navigator.clipboard if omitted. */
   copyText?: (text: string) => void;
   /** Right-click paste: reads clipboard text. Falls back to navigator.clipboard if omitted. */
   readClipboardText?: () => Promise<string | null>;
@@ -356,6 +356,15 @@ export function Terminal(props: TerminalProps) {
       else void navigator.clipboard?.writeText(text).catch(() => undefined);
     };
 
+    // ---- copy-on-select: highlighting text copies it straight to the OS
+    // clipboard (PuTTY style). Explicit copies work too — Ctrl+C with a
+    // selection, or right-click on a selection. Skips the empty event
+    // clearSelection fires so clearing a selection never clobbers the clipboard.
+    const selectionDisp = term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) copyToClipboard(selection);
+    });
+
     // ---- keyboard shortcuts. Ctrl+C = copy selection (else interrupt), Ctrl+F =
     // find, Ctrl +/-/0 = font zoom, Ctrl+V = clipboard paste (text, or image
     // when there's no text).
@@ -456,8 +465,7 @@ export function Terminal(props: TerminalProps) {
     // ---- right-click copy/paste (console/PuTTY style): right-clicking a
     // selection copies it (then clears it, so the next right-click pastes);
     // right-clicking with no selection pastes the clipboard — text or image —
-    // exactly like Ctrl+V. Copying is always this explicit (right-click or
-    // Ctrl+C) — there is deliberately NO copy-on-select.
+    // exactly like Ctrl+V.
     //
     // Capture phase + stopPropagation: xterm's own contextmenu listener (on an
     // inner element) must never run — it moves its hidden textarea under the
@@ -473,8 +481,33 @@ export function Terminal(props: TerminalProps) {
       } else {
         pasteClipboard();
       }
+      // With xterm's own right-click handling suppressed (below), nothing else
+      // restores keyboard focus after the click — without this the terminal
+      // goes deaf to typing until the next left-click.
+      term.focus();
     };
     container.addEventListener('contextmenu', onContextMenu, { capture: true });
+
+    // Right-BUTTON events must never reach xterm's mouse-tracking. When a TUI
+    // enables mouse reporting (Claude Code does), xterm forwards the click to
+    // the app as an escape sequence — and apps that implement their own
+    // right-click paste (Claude Code since ~2.1.143) then paste the clipboard
+    // themselves ON TOP of Conduit's paste above. Seen as: first paste into
+    // Claude fine, every later one doubled (its mouse handling arms lazily).
+    // Right-click is Conduit's copy/paste gesture, so swallow the raw button
+    // events window-level (capture runs before xterm's element listeners); the
+    // contextmenu event above is browser-generated and still fires normally.
+    const suppressRightButton = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      if (!(e.target instanceof Node) || !container.contains(e.target)) return;
+      e.stopPropagation();
+      // Also cancel the default so the mousedown can't blur xterm's hidden
+      // textarea (xterm's suppressed handlers would otherwise refocus it).
+      e.preventDefault();
+    };
+    window.addEventListener('mousedown', suppressRightButton, { capture: true });
+    window.addEventListener('mouseup', suppressRightButton, { capture: true });
+    window.addEventListener('auxclick', suppressRightButton, { capture: true });
 
     // ---- native paste events, funneled through the same deduped path. xterm
     // registers its own 'paste' listeners (on its element AND hidden textarea)
@@ -543,6 +576,15 @@ export function Terminal(props: TerminalProps) {
       container.removeEventListener('contextmenu', onContextMenu, {
         capture: true,
       } as EventListenerOptions);
+      window.removeEventListener('mousedown', suppressRightButton, {
+        capture: true,
+      } as EventListenerOptions);
+      window.removeEventListener('mouseup', suppressRightButton, {
+        capture: true,
+      } as EventListenerOptions);
+      window.removeEventListener('auxclick', suppressRightButton, {
+        capture: true,
+      } as EventListenerOptions);
       container.removeEventListener('paste', onNativePaste, {
         capture: true,
       } as EventListenerOptions);
@@ -556,6 +598,7 @@ export function Terminal(props: TerminalProps) {
       bellDisp.dispose();
       scrollDisp.dispose();
       renderDisp.dispose();
+      selectionDisp.dispose();
       oscDisp.dispose();
       searchResultsDisp.dispose();
       term.dispose();

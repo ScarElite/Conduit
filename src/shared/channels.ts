@@ -22,6 +22,9 @@ export const IPC = {
   PICK_SOUND: 'sound:pick', // invoke -> data URL | null
   WINDOW_CONTROL: 'window:control', // renderer -> main: minimize/maximize/close
   WINDOW_SET_OPACITY: 'window:set-opacity', // renderer -> main: number
+  UPDATE_CHECK: 'update:check', // invoke -> UpdateStatus (also kicks off a live check)
+  UPDATE_STATUS: 'update:status', // main -> renderer: UpdateStatus (streamed as it changes)
+  UPDATE_RESTART: 'update:restart', // renderer -> main: quit + install the downloaded update
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

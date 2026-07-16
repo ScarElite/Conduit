@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal, type PtyApi, type ConduitCommand } from './Terminal';
 import { SettingsPanel } from './SettingsPanel';
 import { applyChrome, applyGlow, findTheme, PRESETS } from './themes';
-import type { Settings, Theme } from '../shared/types';
+import type { Settings, Theme, UpdateStatus } from '../shared/types';
 import { DING_DATA_URL } from './ding-sound';
 
 // Claude Code (and many CLIs) show a braille spinner in the window title while
@@ -58,10 +58,15 @@ interface Tab {
 function TitleBar({
   title,
   version,
+  updateReadyVersion,
+  onRestartToUpdate,
   onToggleSettings,
 }: {
   title: string;
   version: string;
+  /** Set when a downloaded update is staged — shows the "restart to update" pill. */
+  updateReadyVersion: string | null;
+  onRestartToUpdate: () => void;
   onToggleSettings: () => void;
 }) {
   return (
@@ -70,6 +75,15 @@ function TitleBar({
         <span className="titlebar-logo">▮</span>
         <span className="titlebar-title">{title || 'Conduit'}</span>
         {version && <span className="titlebar-version">v{version}</span>}
+        {updateReadyVersion !== null && (
+          <button
+            className="titlebar-update"
+            title="A new version has been downloaded — click to restart into it (or it applies next launch)"
+            onClick={onRestartToUpdate}
+          >
+            ⟳ {updateReadyVersion ? `v${updateReadyVersion} ready` : 'update ready'} — restart
+          </button>
+        )}
       </div>
       <div className="titlebar-actions">
         <button className="tb-btn" title="Settings" onClick={onToggleSettings}>
@@ -165,6 +179,73 @@ export function App() {
     window.term.loadSettings().then(setSettings);
     window.term.getAppVersion().then(setAppVersion);
   }, []);
+
+  // ---- app updates. Main's auto-updater streams its state; the UI stays quiet
+  // for background activity (a staged update just shows the title-bar pill and
+  // applies next launch) but narrates every phase after an explicit /update —
+  // and then restarts into the new version as soon as it's downloaded.
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateToast, setUpdateToast] = useState<string | null>(null);
+  const explicitUpdateRef = useRef(false);
+  const toastTimerRef = useRef<number | undefined>(undefined);
+
+  function showUpdateToast(msg: string, autoHideMs?: number) {
+    window.clearTimeout(toastTimerRef.current);
+    setUpdateToast(msg);
+    if (autoHideMs) {
+      toastTimerRef.current = window.setTimeout(() => setUpdateToast(null), autoHideMs);
+    }
+  }
+
+  useEffect(() => {
+    const off = window.term.onUpdateStatus((s) => {
+      setUpdateStatus(s);
+      const explicit = explicitUpdateRef.current;
+      if (s.phase === 'ready') {
+        if (explicit) {
+          explicitUpdateRef.current = false;
+          showUpdateToast(`Update downloaded${s.version ? ` (v${s.version})` : ''} — restarting…`);
+          window.setTimeout(() => window.term.restartToUpdate(), 1200);
+        }
+        return; // background 'ready' is announced by the title-bar pill
+      }
+      if (!explicit) return;
+      if (s.phase === 'checking') showUpdateToast('Checking for updates…');
+      else if (s.phase === 'downloading') showUpdateToast('Update found — downloading…');
+      else if (s.phase === 'uptodate') {
+        explicitUpdateRef.current = false;
+        showUpdateToast("You're on the latest version.", 6000);
+      } else if (s.phase === 'error') {
+        explicitUpdateRef.current = false;
+        showUpdateToast(`Update check failed: ${s.message ?? 'unknown error'}`, 8000);
+      }
+    });
+    // Seed the current state on load (in a packaged app this also doubles as a
+    // "check on window open", alongside the updater's own 10-minute timer).
+    void window.term.checkForUpdate().then(setUpdateStatus);
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function runUpdateCommand() {
+    if (updateStatus?.phase === 'ready') {
+      showUpdateToast('Update already downloaded — restarting…');
+      window.setTimeout(() => window.term.restartToUpdate(), 800);
+      return;
+    }
+    explicitUpdateRef.current = true;
+    showUpdateToast('Checking for updates…');
+    void window.term.checkForUpdate().then((s) => {
+      setUpdateStatus(s);
+      if (s.phase === 'unsupported') {
+        explicitUpdateRef.current = false;
+        showUpdateToast('Dev build — the updater only runs in the installed app.', 6000);
+      } else if (s.phase === 'downloading') {
+        // A background download was already in flight; narrate it from here.
+        showUpdateToast('Update found — downloading…');
+      }
+    });
+  }
 
   const activeTheme = settings
     ? findTheme(settings.activeTheme, settings.customThemes)
@@ -319,6 +400,11 @@ export function App() {
       description: 'Open the Conduit settings panel',
       run: () => setPanelOpen(true),
     },
+    {
+      name: 'update',
+      description: 'Check for a new Conduit version and install it',
+      run: () => runUpdateCommand(),
+    },
     ...themeNames.map((name) => ({
       name: `theme ${name}`,
       description:
@@ -334,6 +420,10 @@ export function App() {
       <TitleBar
         title={windowTitle}
         version={appVersion}
+        updateReadyVersion={
+          updateStatus?.phase === 'ready' ? updateStatus.version ?? '' : null
+        }
+        onRestartToUpdate={() => window.term.restartToUpdate()}
         onToggleSettings={() => setPanelOpen((o) => !o)}
       />
       <TabStrip
@@ -387,6 +477,7 @@ export function App() {
           );
         })}
       </div>
+      {updateToast && <div className="update-toast">{updateToast}</div>}
       <SettingsPanel
         open={panelOpen}
         settings={settings}

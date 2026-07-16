@@ -92,6 +92,26 @@ export const DEFAULT_SETTINGS: Settings = {
 export type WindowControlAction = 'minimize' | 'maximize' | 'close';
 
 /**
+ * Auto-update state, streamed main -> renderer. The updater downloads in the
+ * background; 'ready' means the new version is staged and applies on the next
+ * launch (or immediately via restartToUpdate()).
+ */
+export interface UpdateStatus {
+  phase:
+    | 'idle' // packaged app, no check has run yet
+    | 'checking' // asking update.electronjs.org
+    | 'downloading' // update found, downloading in the background
+    | 'ready' // downloaded + staged; restart applies it
+    | 'uptodate' // check finished: already on the latest version
+    | 'error' // check/download failed (offline, GitHub down, …)
+    | 'unsupported'; // dev (unpackaged) build — updater inactive
+  /** New version ("1.0.8") when known (downloading/ready). */
+  version?: string;
+  /** Human-readable detail for 'error'. */
+  message?: string;
+}
+
+/**
  * The narrow, typed surface exposed to the renderer on `window.term`
  * (implemented in preload via contextBridge). This is the entire IPC contract.
  */
@@ -122,6 +142,12 @@ export interface TermBridge {
   openExternal(url: string): void;
   /** The installed app's version (package.json version via app.getVersion()). */
   getAppVersion(): Promise<string>;
+  /** Current update state; also triggers a fresh check when one isn't running. */
+  checkForUpdate(): Promise<UpdateStatus>;
+  /** Subscribe to update-state changes. Returns unsubscribe. */
+  onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
+  /** Quit and install a 'ready' update immediately (no-op otherwise). */
+  restartToUpdate(): void;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
   /** Open a file dialog and return the chosen sound as a data URL, or null. */

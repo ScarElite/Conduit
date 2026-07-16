@@ -1,11 +1,20 @@
-import { app, BrowserWindow, ipcMain, dialog, session, Menu, shell } from 'electron';
+import {
+  app,
+  autoUpdater,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  session,
+  Menu,
+  shell,
+} from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { appendFileSync } from 'node:fs';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import { IPC } from '../shared/channels';
-import type { Settings, WindowControlAction } from '../shared/types';
+import type { Settings, UpdateStatus, WindowControlAction } from '../shared/types';
 import {
   spawnPty,
   writeToPty,
@@ -58,6 +67,33 @@ if (gotSingleInstanceLock) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+
+// ---- update state, mirrored to the renderer (title-bar pill + /update) ----
+// update-electron-app above owns the schedule (launch + every 10 min); these
+// listeners just observe the shared autoUpdater singleton so the UI can show
+// what it's doing — and diag() leaves a trail on disk for debugging a machine
+// that "never updates" (e.g. someone who never relaunches the app).
+let updateStatus: UpdateStatus = { phase: app.isPackaged ? 'idle' : 'unsupported' };
+
+function setUpdateStatus(next: UpdateStatus): void {
+  updateStatus = next;
+  diag(`update: ${next.phase}${next.version ? ` v${next.version}` : ''} ${next.message ?? ''}`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC.UPDATE_STATUS, next);
+  }
+}
+
+if (gotSingleInstanceLock && app.isPackaged) {
+  autoUpdater.on('checking-for-update', () => setUpdateStatus({ phase: 'checking' }));
+  autoUpdater.on('update-available', () => setUpdateStatus({ phase: 'downloading' }));
+  autoUpdater.on('update-not-available', () => setUpdateStatus({ phase: 'uptodate' }));
+  autoUpdater.on('update-downloaded', (_e, _notes, releaseName) =>
+    setUpdateStatus({ phase: 'ready', version: releaseName || undefined }),
+  );
+  autoUpdater.on('error', (err) =>
+    setUpdateStatus({ phase: 'error', message: err?.message || 'update failed' }),
+  );
+}
 
 const clampOpacity = (v: number): number =>
   Number.isFinite(v) ? Math.min(1, Math.max(0.3, v)) : 1;
@@ -207,6 +243,33 @@ function registerIpc(): void {
 
   // ---- app version (shown in the title bar so update state is checkable at a glance) ----
   ipcMain.handle(IPC.APP_VERSION, () => app.getVersion());
+
+  // ---- explicit update check (/update). Returns the current state at once;
+  // progress then streams via UPDATE_STATUS events.
+  ipcMain.handle(IPC.UPDATE_CHECK, (): UpdateStatus => {
+    if (!app.isPackaged) return updateStatus; // dev build: 'unsupported'
+    // A check/download already in flight (ours or update-electron-app's
+    // 10-minute timer) — don't stack another; Squirrel throws on re-entry.
+    if (updateStatus.phase !== 'checking' && updateStatus.phase !== 'downloading') {
+      try {
+        autoUpdater.checkForUpdates();
+      } catch (err) {
+        setUpdateStatus({
+          phase: 'error',
+          message: err instanceof Error ? err.message : 'update check failed',
+        });
+      }
+    }
+    return updateStatus;
+  });
+  ipcMain.on(IPC.UPDATE_RESTART, () => {
+    // Only meaningful once a downloaded update is staged. quitAndInstall exits
+    // the app, swaps in the new version, and relaunches it.
+    if (updateStatus.phase === 'ready') {
+      diag('update: quitAndInstall');
+      autoUpdater.quitAndInstall();
+    }
+  });
 
   // ---- settings persistence ----
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());
