@@ -53,6 +53,12 @@ export interface TerminalProps {
   readClipboardText?: () => Promise<string | null>;
   /** Click on a URL: opens it (e.g. in the default browser). Falls back to window.open. */
   openLink?: (url: string) => void;
+  /**
+   * Resolves a file dropped on the terminal to its absolute path (in Electron:
+   * `webUtils.getPathForFile`). Without it, dropped FILES are ignored — dropped
+   * text still pastes.
+   */
+  getFilePath?: (file: File) => string | null;
   /** OSC 133 command-finished signal (exit code + duration in ms). */
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
@@ -79,6 +85,13 @@ interface PastedImage {
 const DEFAULT_FONT = 'Consolas, ui-monospace, monospace';
 const MAX_PASTED_IMAGES = 24;
 
+// Drag-and-drop path quoting (conhost / Windows Terminal behavior): a dropped
+// path is wrapped in DOUBLE quotes when it holds anything a shell would split on
+// or interpret. Double rather than single quotes because the same inserted text
+// has to work in PowerShell, cmd, and anything else a host may be running —
+// they all read "..." as one literal argument.
+const PATH_NEEDS_QUOTES = /[\s&()[\]{}^=;!'+,`~@#$%]/;
+
 // Warm "search highlight" decoration colors — readable on Conduit's dark themes
 // and distinct from the (often green) foreground text. Active match is brighter.
 const SEARCH_DECORATIONS = {
@@ -104,6 +117,8 @@ export function Terminal(props: TerminalProps) {
 
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
   const [cellHeight, setCellHeight] = useState(0);
+  // True while something is being dragged over this pane (drives the drop hint).
+  const [dropActive, setDropActive] = useState(false);
   const [, bumpTick] = useReducer((n: number) => n + 1, 0);
 
   // ---- find-in-terminal (Ctrl+F) ----
@@ -524,6 +539,72 @@ export function Terminal(props: TerminalProps) {
     };
     container.addEventListener('paste', onNativePaste, { capture: true });
 
+    // ---- drag & drop: dropping files inserts their paths at the cursor, the way
+    // conhost/Windows Terminal does — quoted when they need it, space-separated
+    // for a multi-file drop, with a trailing space so the next drop (or typed
+    // argument) doesn't run into the last path. It's a plain paste, so it works
+    // identically at a shell prompt and inside a running TUI: dropping an image
+    // on Claude Code attaches it, since Claude auto-detects image file paths.
+    //
+    // The hint is refreshed by the continuous dragover stream and expires just
+    // after it stops. That's deliberately simpler than pairing dragenter with
+    // dragleave, which fire once per child element and strand the highlight on
+    // when a drag ends off-window.
+    let dropHintTimer = 0;
+    const showDropHint = () => {
+      window.clearTimeout(dropHintTimer);
+      setDropActive(true);
+      dropHintTimer = window.setTimeout(() => setDropActive(false), 180);
+    };
+    const hideDropHint = () => {
+      window.clearTimeout(dropHintTimer);
+      setDropActive(false);
+    };
+
+    const droppedPaths = (dt: DataTransfer | null): string[] => {
+      const resolve = propsRef.current.getFilePath;
+      if (!dt || !resolve) return [];
+      return Array.from(dt.files)
+        .map((f) => {
+          try {
+            return resolve(f);
+          } catch {
+            return null; // host couldn't resolve it — skip, don't kill the drop
+          }
+        })
+        .filter((p): p is string => !!p);
+    };
+
+    // preventDefault on dragover is what makes the element a drop target at all;
+    // stopPropagation keeps the drag away from xterm's hidden textarea, which
+    // (being a real textarea) would accept a text drag itself and insert it a
+    // second time.
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      showDropHint();
+    };
+
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideDropHint();
+      const paths = droppedPaths(e.dataTransfer);
+      // No files? Fall back to dragged text (a selection or link from another
+      // app) — same as dropping onto any other console.
+      const text = paths.length
+        ? paths.map((p) => (PATH_NEEDS_QUOTES.test(p) ? `"${p}"` : p)).join(' ') + ' '
+        : e.dataTransfer?.getData('text/plain') ?? '';
+      if (!text) return;
+      term.paste(text); // honors bracketed-paste mode
+      term.focus(); // the drag stole focus; typing should continue straight away
+    };
+
+    container.addEventListener('dragover', onDragOver, { capture: true });
+    container.addEventListener('drop', onDrop, { capture: true });
+    container.addEventListener('dragleave', hideDropHint, { capture: true });
+
     // Ctrl + mouse wheel = font zoom (capture phase so xterm doesn't scroll).
     // Accumulate raw deltas so one wheel notch ≈ one step and a fast scroll or
     // trackpad burst can't slam the font straight to the size limit.
@@ -586,6 +667,14 @@ export function Terminal(props: TerminalProps) {
         capture: true,
       } as EventListenerOptions);
       container.removeEventListener('paste', onNativePaste, {
+        capture: true,
+      } as EventListenerOptions);
+      window.clearTimeout(dropHintTimer);
+      container.removeEventListener('dragover', onDragOver, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener('drop', onDrop, { capture: true } as EventListenerOptions);
+      container.removeEventListener('dragleave', hideDropHint, {
         capture: true,
       } as EventListenerOptions);
       container.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
@@ -791,9 +880,16 @@ export function Terminal(props: TerminalProps) {
     (promptLine < navBuf.viewportY || promptLine >= navBuf.viewportY + term.rows);
 
   return (
-    <div className="terminal-host">
+    <div className={`terminal-host${dropActive ? ' drop-active' : ''}`}>
       <div className="terminal-mount" ref={containerRef} />
       <ImageOverlay images={overlayImages} onRemove={removeImage} />
+      {dropActive && (
+        // pointer-events: none (in CSS) — the overlay must never become the drag
+        // target, or the drop would land on it instead of the terminal.
+        <div className="term-drop">
+          <span className="term-drop-label">Drop to insert path</span>
+        </div>
+      )}
       {(scrolledUp || promptOffscreen) && (
         <div className="term-nav">
           {!atTop && (

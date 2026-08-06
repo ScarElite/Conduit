@@ -262,6 +262,32 @@ export function App() {
     if (settings) window.term.setOpacity(settings.windowOpacity);
   }, [settings?.windowOpacity]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Files dropped anywhere OUTSIDE a terminal pane (title bar, tab strip,
+  // settings panel) are inert: Chromium's default is to navigate to the dropped
+  // file, which would replace the whole UI with it. Main blocks the navigation
+  // too, but swallowing it here also stops the "copy" cursor promising a drop
+  // that does nothing. Terminal panes stopPropagation their own drags, so those
+  // never reach this listener.
+  useEffect(() => {
+    const swallowDrag = (e: DragEvent) => {
+      const dt = e.dataTransfer;
+      const hasFiles = !!dt && Array.from(dt.types).includes('Files');
+      const target = e.target instanceof Element ? e.target : null;
+      // Dragging TEXT into a real text field (a settings input) is a normal
+      // edit gesture — leave it alone. Files are always swallowed: dropped on an
+      // input, Chromium navigates to them rather than inserting anything.
+      if (!hasFiles && target?.closest('input, textarea, [contenteditable="true"]')) return;
+      e.preventDefault();
+      if (dt) dt.dropEffect = 'none';
+    };
+    window.addEventListener('dragover', swallowDrag);
+    window.addEventListener('drop', swallowDrag);
+    return () => {
+      window.removeEventListener('dragover', swallowDrag);
+      window.removeEventListener('drop', swallowDrag);
+    };
+  }, []);
+
   function getPtyApi(id: string): PtyApi {
     let api = ptyApisRef.current.get(id);
     if (!api) {
@@ -464,6 +490,7 @@ export function App() {
                 copyText={(txt) => window.term.copyText(txt)}
                 readClipboardText={() => window.term.readClipboardText()}
                 openLink={(url) => window.term.openExternal(url)}
+                getFilePath={(file) => window.term.getPathForFile(file)}
                 onCommandFinished={(_exit, durationMs) => {
                   if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
                     playDing();

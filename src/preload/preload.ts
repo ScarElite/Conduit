@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import { IPC } from '../shared/channels';
 import type { Settings, TermBridge, UpdateStatus, WindowControlAction } from '../shared/types';
 
@@ -46,6 +46,16 @@ const api: TermBridge = {
   },
   openExternal(url: string) {
     ipcRenderer.send(IPC.OPEN_EXTERNAL, url);
+  },
+  getPathForFile(file: File): string {
+    // Drag-and-drop path resolution. Electron 32+ removed the non-standard
+    // `File.path`; webUtils is the sanctioned replacement and needs no IPC (it
+    // reads a path Chromium already holds for the dropped file).
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return ''; // not a real filesystem file (e.g. a dragged browser image)
+    }
   },
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC.APP_VERSION);

@@ -140,6 +140,8 @@ export interface TermBridge {
   readClipboardText(): Promise<string>;
   /** Open an http(s) URL in the user's default browser (terminal link click). */
   openExternal(url: string): void;
+  /** Absolute path of a dropped File, or '' if it has none (not a real file). */
+  getPathForFile(file: File): string;
   /** The installed app's version (package.json version via app.getVersion()). */
   getAppVersion(): Promise<string>;
   /** Current update state; also triggers a fresh check when one isn't running. */

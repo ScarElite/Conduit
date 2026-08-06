@@ -97,6 +97,10 @@ if (action === 'focus') {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', x, y, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', x, y, clickCount: 1 });
   console.log(`clicked ${x},${y}`);
+} else if (action === 'esc') {
+  await key('rawKeyDown', 'Escape', 'Escape', 27, 0);
+  await key('keyUp', 'Escape', 'Escape', 27, 0);
+  console.log('sent escape');
 } else if (action === 'backspace') {
   const n = Number(arg ?? 1);
   for (let i = 0; i < n; i++) {
@@ -138,6 +142,54 @@ if (action === 'focus') {
     await new Promise((r) => setTimeout(r, 40));
   }
   console.log(`typed ${arg}`);
+} else if (action === 'dropfiles') {
+  // dropfiles "C:\a.txt;C:\b.txt" — drag real files onto the terminal and drop.
+  // dragData.files is what makes Chromium hand the renderer genuine File objects
+  // with paths (so Electron's webUtils.getPathForFile resolves them) — a
+  // hand-built DataTransfer in page JS can never do that.
+  const files = arg.split(';').filter(Boolean);
+  const r = await send('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.xterm-screen') || document.body; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
+    returnByValue: true,
+  });
+  const { x, y } = r.result.value;
+  const data = { items: [], files, dragOperationsMask: 1 }; // 1 = copy
+  for (const type of ['dragEnter', 'dragOver', 'drop']) {
+    await send('Input.dispatchDragEvent', { type, x, y, data });
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  console.log(`dropped ${files.length} file(s) at ${Math.round(x)},${Math.round(y)}`);
+} else if (action === 'droptext') {
+  // droptext "some text" — drag plain text (e.g. from a browser) onto the terminal.
+  const r = await send('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.xterm-screen') || document.body; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
+    returnByValue: true,
+  });
+  const { x, y } = r.result.value;
+  const data = { items: [{ mimeType: 'text/plain', data: arg }], dragOperationsMask: 1 };
+  for (const type of ['dragEnter', 'dragOver', 'drop']) {
+    await send('Input.dispatchDragEvent', { type, x, y, data });
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  console.log(`dropped text: ${arg}`);
+} else if (action === 'dragshot') {
+  // dragshot "C:\a.txt;out.png" — hold a file over the terminal and screenshot the
+  // hover state, then cancel the drag. One connection: the drop hint expires
+  // shortly after the dragOver stream stops, so a separate `shot` run is too slow.
+  const parts = arg.split(';');
+  const out = parts.pop();
+  const r = await send('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.xterm-screen') || document.body; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
+    returnByValue: true,
+  });
+  const { x, y } = r.result.value;
+  const data = { items: [], files: parts, dragOperationsMask: 1 };
+  await send('Input.dispatchDragEvent', { type: 'dragEnter', x, y, data });
+  await send('Input.dispatchDragEvent', { type: 'dragOver', x, y, data });
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(out, Buffer.from(shot.data, 'base64'));
+  await send('Input.dispatchDragEvent', { type: 'dragCancel', x, y, data });
+  console.log('saved ' + out);
 } else if (action === 'shot') {
   const r = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(arg, Buffer.from(r.data, 'base64'));
