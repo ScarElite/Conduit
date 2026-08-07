@@ -60,6 +60,21 @@ export interface Theme {
   glowStrength?: number;
 }
 
+/**
+ * A user-defined shell shortcut: typing `name` at the prompt switches to
+ * `folder` and (optionally) runs `command` — e.g. `rf` -> the reporterflow repo
+ * + `claude`. Conduit injects these as PowerShell functions when it spawns a
+ * shell, so there is no $PROFILE to edit and no install step.
+ */
+export interface Shortcut {
+  /** What you type. Must be a plain PowerShell function name (letters/digits/_/-). */
+  name: string;
+  /** Folder to switch to. Blank = stay where you are. */
+  folder: string;
+  /** Command to run after switching (e.g. "claude"). Blank = just go there. */
+  command: string;
+}
+
 export interface Settings {
   /** Name of the active theme (a preset name or a custom theme name). */
   activeTheme: string;
@@ -76,6 +91,8 @@ export interface Settings {
   fontSizeOffset: number;
   /** Optional shell override (e.g. 'pwsh.exe', 'cmd.exe'). Empty = auto-detect. */
   shell?: string;
+  /** Folder/command shortcuts injected into every PowerShell Conduit spawns. */
+  shortcuts: Shortcut[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -87,6 +104,7 @@ export const DEFAULT_SETTINGS: Settings = {
   windowOpacity: 1,
   fontSizeOffset: 0,
   shell: '',
+  shortcuts: [],
 };
 
 export type WindowControlAction = 'minimize' | 'maximize' | 'close';
@@ -142,6 +160,10 @@ export interface TermBridge {
   openExternal(url: string): void;
   /** Absolute path of a dropped File, or '' if it has none (not a real file). */
   getPathForFile(file: File): string;
+  /** The folder a dropped path implies: itself if a directory, else its parent. */
+  resolveDropDir(paths: string[]): Promise<string | null>;
+  /** Open a folder picker (shortcut editor); returns the chosen path or null. */
+  pickFolder(): Promise<string | null>;
   /** The installed app's version (package.json version via app.getVersion()). */
   getAppVersion(): Promise<string>;
   /** Current update state; also triggers a fresh check when one isn't running. */

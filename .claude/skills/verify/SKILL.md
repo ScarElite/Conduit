@@ -46,6 +46,17 @@ is 1 via cdp-eval if clicks seem to miss).
 - **Prompt-state detection** (`atShellPromptRef`) comes from OSC 133 injected into
   PowerShell only (`src/main/pty.ts`). To simulate "an app is running" (Claude Code
   state) cheaply, start `node` (REPL emits no OSC 133).
+- **The dev shell loads the user's real `$PROFILE`** — which defines its own
+  functions (e.g. `rf` = cd reporterflow-app + launch `claude`). Typing a short
+  word to "test something" can start a REAL Claude Code session that burns quota
+  and can act on a real repo. Probe with `$function:<name>` (prints the body,
+  runs nothing) before executing any name you didn't define yourself.
+- **`CONDUIT_USER_DATA` only redirects settings if the store is built lazily** —
+  `app.setPath('userData')` runs in main.ts's body, i.e. AFTER its imports. A
+  module-scope `new Store(...)` resolves the real userData first and the dev
+  instance then reads/writes the installed app's live settings (fixed in
+  src/main/settings.ts — keep it lazy). Seeded settings silently not applying is
+  the symptom.
 - **Clipboard is shared machine state** — the user is on this machine. Back up
   (`Get-Clipboard -Raw` → file) and restore when done.
   `[System.Windows.Forms.Clipboard]::SetImage($bmp)` simulates a Snipping Tool

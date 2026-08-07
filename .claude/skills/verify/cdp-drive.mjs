@@ -147,7 +147,10 @@ if (action === 'focus') {
   // dragData.files is what makes Chromium hand the renderer genuine File objects
   // with paths (so Electron's webUtils.getPathForFile resolves them) — a
   // hand-built DataTransfer in page JS can never do that.
-  const files = arg.split(';').filter(Boolean);
+  // A leading "shift:" holds Shift for the whole drag (Conduit reads it as "cd there").
+  const shift = arg.startsWith('shift:');
+  const files = (shift ? arg.slice(6) : arg).split(';').filter(Boolean);
+  const modifiers = shift ? 8 : 0;
   const r = await send('Runtime.evaluate', {
     expression: `(() => { const el = document.querySelector('.xterm-screen') || document.body; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
     returnByValue: true,
@@ -155,10 +158,10 @@ if (action === 'focus') {
   const { x, y } = r.result.value;
   const data = { items: [], files, dragOperationsMask: 1 }; // 1 = copy
   for (const type of ['dragEnter', 'dragOver', 'drop']) {
-    await send('Input.dispatchDragEvent', { type, x, y, data });
+    await send('Input.dispatchDragEvent', { type, x, y, data, modifiers });
     await new Promise((r) => setTimeout(r, 120));
   }
-  console.log(`dropped ${files.length} file(s) at ${Math.round(x)},${Math.round(y)}`);
+  console.log(`dropped ${files.length} file(s)${shift ? ' with Shift' : ''} at ${Math.round(x)},${Math.round(y)}`);
 } else if (action === 'droptext') {
   // droptext "some text" — drag plain text (e.g. from a browser) onto the terminal.
   const r = await send('Runtime.evaluate', {

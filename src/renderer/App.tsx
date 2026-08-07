@@ -491,6 +491,7 @@ export function App() {
                 readClipboardText={() => window.term.readClipboardText()}
                 openLink={(url) => window.term.openExternal(url)}
                 getFilePath={(file) => window.term.getPathForFile(file)}
+                resolveDropDir={(paths) => window.term.resolveDropDir(paths)}
                 onCommandFinished={(_exit, durationMs) => {
                   if (settings.dingEnabled && durationMs >= settings.dingThresholdMs) {
                     playDing();

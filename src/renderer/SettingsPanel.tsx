@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ChromeTheme, Settings, Theme, XtermTheme } from '../shared/types';
+import type { ChromeTheme, Settings, Shortcut, Theme, XtermTheme } from '../shared/types';
 import { PRESETS } from './themes';
 
 interface Props {
@@ -48,6 +48,24 @@ const CHROME_FIELDS: { key: keyof ChromeTheme; label: string }[] = [
   { key: 'panelFg', label: 'Panel text' },
   { key: 'scrollbar', label: 'Scrollbar' },
 ];
+
+// Must match SHORTCUT_NAME in src/main/pty.ts — a name that isn't a legal
+// PowerShell function name is silently skipped at spawn, so flag it here.
+const SHORTCUT_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+function shortcutProblem(sc: Shortcut, index: number, all: Shortcut[]): string | null {
+  const name = sc.name.trim();
+  if (!name) return 'Give it a name to type at the prompt.';
+  if (!SHORTCUT_NAME.test(name)) {
+    return 'Use letters, digits, _ or - (starting with a letter or _).';
+  }
+  const dupe = all.some(
+    (o, i) => i < index && o.name.trim().toLowerCase() === name.toLowerCase(),
+  );
+  if (dupe) return `Another shortcut is already called “${name}”.`;
+  if (!sc.folder.trim() && !sc.command.trim()) return 'Set a folder, a command, or both.';
+  return null;
+}
 
 function colorInputValue(v: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#000000';
@@ -111,6 +129,34 @@ export function SettingsPanel(props: Props) {
   const pickSound = async () => {
     const url = await window.term.pickSoundFile();
     if (url) onChangeSettings({ dingSound: url });
+  };
+
+  // ---- shortcuts ----
+  const shortcuts = settings.shortcuts ?? [];
+  const setShortcut = (i: number, patch: Partial<Shortcut>) =>
+    onChangeSettings({
+      shortcuts: shortcuts.map((s, j) => (j === i ? { ...s, ...patch } : s)),
+    });
+  const addShortcut = () =>
+    onChangeSettings({ shortcuts: [...shortcuts, { name: '', folder: '', command: '' }] });
+  const removeShortcut = (i: number) =>
+    onChangeSettings({ shortcuts: shortcuts.filter((_, j) => j !== i) });
+  const browseFolder = async (i: number) => {
+    const dir = await window.term.pickFolder();
+    if (dir) setShortcut(i, { folder: dir });
+  };
+  // Dropping onto the folder field fills it in. resolveDropDir means dropping a
+  // FILE from the folder works too — it resolves to the containing folder.
+  const dropFolder = (i: number, e: React.DragEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation(); // App's window-level guard would otherwise swallow it
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const p = window.term.getPathForFile(file);
+    if (!p) return;
+    void window.term.resolveDropDir([p]).then((dir) => {
+      if (dir) setShortcut(i, { folder: dir });
+    });
   };
 
   return (
@@ -325,6 +371,78 @@ export function SettingsPanel(props: Props) {
             <p className="hint">
               Sound: {settings.dingSound === 'builtin' ? 'built-in chime' : 'custom file'}.
               Works automatically in PowerShell — no setup needed.
+            </p>
+          </section>
+
+          {/* ---- Shortcuts ---- */}
+          <section className="panel-section">
+            <h3>Shortcuts</h3>
+            <p className="hint">
+              Type the name at the prompt to jump to a folder and run something —
+              e.g. <code>rf</code> → the reporterflow repo + <code>claude</code>.
+              Conduit defines these in every shell it starts, so there&apos;s no
+              profile to edit. Extra arguments pass through (<code>rf --continue</code>).
+            </p>
+            {shortcuts.map((sc, i) => {
+              const problem = shortcutProblem(sc, i, shortcuts);
+              return (
+                <div className="shortcut" key={i}>
+                  <div className="shortcut-row">
+                    <input
+                      className="sc-name"
+                      type="text"
+                      placeholder="rf"
+                      spellCheck={false}
+                      value={sc.name}
+                      onChange={(e) => setShortcut(i, { name: e.target.value })}
+                    />
+                    <input
+                      className="sc-folder"
+                      type="text"
+                      placeholder="Folder — drag one here"
+                      spellCheck={false}
+                      value={sc.folder}
+                      onChange={(e) => setShortcut(i, { folder: e.target.value })}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = 'copy';
+                      }}
+                      onDrop={(e) => dropFolder(i, e)}
+                    />
+                    <button
+                      className="btn sc-btn"
+                      title="Choose a folder…"
+                      onClick={() => browseFolder(i)}
+                    >
+                      …
+                    </button>
+                    <button
+                      className="btn btn-danger sc-btn"
+                      title="Delete this shortcut"
+                      onClick={() => removeShortcut(i)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <input
+                    className="sc-cmd"
+                    type="text"
+                    placeholder="Command to run there (optional) — e.g. claude"
+                    spellCheck={false}
+                    value={sc.command}
+                    onChange={(e) => setShortcut(i, { command: e.target.value })}
+                  />
+                  {problem && <p className="sc-problem">{problem}</p>}
+                </div>
+              );
+            })}
+            <button className="btn" onClick={addShortcut}>
+              ＋ Add shortcut
+            </button>
+            <p className="hint">
+              New and edited shortcuts apply to tabs opened after the change — this
+              tab keeps the ones it started with.
             </p>
           </section>
 

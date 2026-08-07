@@ -213,7 +213,7 @@ function registerIpc(): void {
   // ---- pty lifecycle (the standalone host's PtyApi implementation) ----
   ipcMain.on(IPC.PTY_START, (e, m: { paneId: string; cols: number; rows: number }) => {
     const settings = loadSettings();
-    spawnPty(m.paneId, e.sender, m?.cols, m?.rows, settings.shell);
+    spawnPty(m.paneId, e.sender, m?.cols, m?.rows, settings.shell, settings.shortcuts);
   });
   ipcMain.on(IPC.PTY_WRITE, (_e, m: { paneId: string; data: string }) =>
     writeToPty(m.paneId, m.data),
@@ -269,6 +269,30 @@ function registerIpc(): void {
       diag('update: quitAndInstall');
       autoUpdater.quitAndInstall();
     }
+  });
+
+  // ---- the folder a dropped path implies (Shift+drop = cd there) ----
+  ipcMain.handle(IPC.DROP_DIR, async (_e, paths: string[]) => {
+    for (const p of Array.isArray(paths) ? paths : []) {
+      try {
+        const st = await fs.stat(p);
+        return st.isDirectory() ? p : path.dirname(p);
+      } catch {
+        // gone or unreadable — try the next dropped path
+      }
+    }
+    return null;
+  });
+
+  // ---- pick a folder (shortcut editor) ----
+  ipcMain.handle(IPC.PICK_FOLDER, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const opts = { title: 'Choose a folder', properties: ['openDirectory' as const] };
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts);
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 
   // ---- settings persistence ----

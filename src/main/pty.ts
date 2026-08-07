@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { WebContents } from 'electron';
 import { IPC } from '../shared/channels';
+import type { Shortcut } from '../shared/types';
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 30;
@@ -69,14 +70,72 @@ function Global:prompt {
 $__cH = Get-History -Count 1 -ErrorAction SilentlyContinue
 if ($__cH) { $Global:__Conduit_LastHistId = $__cH.Id }`;
 
-function buildShellArgs(file: string): string[] {
+/** PowerShell single-quoted literal — the only quoting that never interpolates. */
+function psLiteral(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+// A shortcut name becomes a function name, so it has to be one PowerShell can
+// call bare — anything else would need call-operator syntax and defeat the point
+// of just typing `rf`.
+const SHORTCUT_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+// -EncodedCommand travels on the command line, which Windows caps around 32k
+// characters (and base64 of UTF-16LE is ~2.7x the source). Stop well short
+// rather than risk a shell that won't spawn at all.
+const MAX_SETUP_CHARS = 10000;
+
+/**
+ * Compile the user's shortcuts into PowerShell functions, injected at spawn
+ * next to PROMPT_SETUP. They become real commands — so they tab-complete,
+ * compose, and forward arguments (`rf --continue`) like anything else.
+ *
+ * A missing folder aborts with a warning instead of running the command in
+ * whatever directory the shell happened to be sitting in.
+ */
+function buildShortcutSetup(shortcuts: Shortcut[]): string {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let size = 0;
+  for (const sc of shortcuts ?? []) {
+    const name = (sc?.name ?? '').trim();
+    const folder = (sc?.folder ?? '').trim();
+    const command = (sc?.command ?? '').trim();
+    if (!SHORTCUT_NAME.test(name) || seen.has(name.toLowerCase())) continue;
+    if (!folder && !command) continue;
+    seen.add(name.toLowerCase());
+
+    const body: string[] = [];
+    if (folder) {
+      const lit = psLiteral(folder);
+      const warn = psLiteral(`Conduit shortcut '${name}': folder not found - ${folder}`);
+      body.push(`  if (-not (Test-Path -LiteralPath ${lit})) { Write-Warning ${warn}; return }`);
+      body.push(`  Set-Location -LiteralPath ${lit}`);
+    }
+    if (command) {
+      // Forward extra arguments only for a single simple invocation — splatting
+      // into a compound statement would attach them to whatever ran last.
+      const simple = !/[;|&\r\n><]/.test(command);
+      body.push(`  ${simple ? `${command} @args` : command}`);
+    }
+    const fn = `function Global:${name} {\n${body.join('\n')}\n}`;
+    if (size + fn.length > MAX_SETUP_CHARS) break;
+    size += fn.length;
+    out.push(fn);
+  }
+  return out.join('\n');
+}
+
+function buildShellArgs(file: string, shortcuts: Shortcut[]): string[] {
   if (isPowerShell(file)) {
     // -EncodedCommand avoids all command-line escaping; -NoExit keeps the shell
     // interactive after the setup runs (which produces no visible output).
-    const encoded = Buffer.from(PROMPT_SETUP, 'utf16le').toString('base64');
+    const shortcutSetup = buildShortcutSetup(shortcuts);
+    const script = shortcutSetup ? `${PROMPT_SETUP}\n${shortcutSetup}` : PROMPT_SETUP;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
     return ['-NoExit', '-EncodedCommand', encoded];
   }
-  return [];
+  return []; // non-PowerShell shells get no injection (same as the prompt setup)
 }
 
 /**
@@ -90,11 +149,12 @@ export function spawnPty(
   cols = DEFAULT_COLS,
   rows = DEFAULT_ROWS,
   shellOverride?: string,
+  shortcuts: Shortcut[] = [],
 ): void {
   killPty(paneId);
 
   const file = resolveShellExecutable(shellOverride);
-  const proc = pty.spawn(file, buildShellArgs(file), {
+  const proc = pty.spawn(file, buildShellArgs(file, shortcuts), {
     name: 'xterm-256color',
     cols: cols > 0 ? cols : DEFAULT_COLS,
     rows: rows > 0 ? rows : DEFAULT_ROWS,

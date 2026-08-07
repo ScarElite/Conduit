@@ -59,6 +59,12 @@ export interface TerminalProps {
    * text still pastes.
    */
   getFilePath?: (file: File) => string | null;
+  /**
+   * Shift+drop support: resolves the dropped paths to the folder to switch to
+   * (the dropped folder itself, or a dropped file's parent). Without it,
+   * Shift+drop is just a normal drop.
+   */
+  resolveDropDir?: (paths: string[]) => Promise<string | null>;
   /** OSC 133 command-finished signal (exit code + duration in ms). */
   onCommandFinished?: (exitCode: number, durationMs: number) => void;
   /** Terminal bell. */
@@ -117,8 +123,11 @@ export function Terminal(props: TerminalProps) {
 
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
   const [cellHeight, setCellHeight] = useState(0);
-  // True while something is being dragged over this pane (drives the drop hint).
-  const [dropActive, setDropActive] = useState(false);
+  // Set while something is dragged over this pane; `mode` is what dropping would
+  // do right now, `shiftable` whether holding Shift would switch to 'cd'.
+  const [dropHint, setDropHint] = useState<{ mode: 'path' | 'cd'; shiftable: boolean } | null>(
+    null,
+  );
   const [, bumpTick] = useReducer((n: number) => n + 1, 0);
 
   // ---- find-in-terminal (Ctrl+F) ----
@@ -252,16 +261,21 @@ export function Terminal(props: TerminalProps) {
       scheduleTick();
     };
 
+    // Bookkeeping for "a line was submitted". Shared by real keystrokes and by
+    // commands Conduit runs itself (Shift+drop's cd), which never pass through
+    // term.onData and would otherwise leave these refs stale.
+    const markLineSubmitted = () => {
+      atShellPromptRef.current = false;
+      // Remember where — "jump to last prompt" scrolls back to this line.
+      lastPromptMarkerRef.current?.dispose();
+      lastPromptMarkerRef.current = term.registerMarker(0) ?? null;
+      scheduleTick();
+    };
+
     // ---- pty <-> terminal wiring ----
     const offData = ptyApi.onData((d) => term.write(d));
     const dataDisp = term.onData((d) => {
-      if (d === '\r') {
-        atShellPromptRef.current = false; // a line was submitted
-        // Remember where — "jump to last prompt" scrolls back to this line.
-        lastPromptMarkerRef.current?.dispose();
-        lastPromptMarkerRef.current = term.registerMarker(0) ?? null;
-        scheduleTick();
-      }
+      if (d === '\r') markLineSubmitted();
       // Clear "fresh prompt" only when a PRINTABLE character is typed (adds
       // content to the line). Ignore escape sequences — arrow keys, and crucially
       // the focus-report bytes xterm emits when the command/search bar steals and
@@ -551,15 +565,28 @@ export function Terminal(props: TerminalProps) {
     // dragleave, which fire once per child element and strand the highlight on
     // when a drag ends off-window.
     let dropHintTimer = 0;
-    const showDropHint = () => {
+    let hintState: { mode: 'path' | 'cd'; shiftable: boolean } | null = null;
+    const showDropHint = (mode: 'path' | 'cd', shiftable: boolean) => {
       window.clearTimeout(dropHintTimer);
-      setDropActive(true);
-      dropHintTimer = window.setTimeout(() => setDropActive(false), 180);
+      // Only re-render when the hint actually changes — dragover fires many
+      // times a second and the state object would otherwise be new every time.
+      if (!hintState || hintState.mode !== mode || hintState.shiftable !== shiftable) {
+        hintState = { mode, shiftable };
+        setDropHint(hintState);
+      }
+      dropHintTimer = window.setTimeout(hideDropHint, 180);
     };
     const hideDropHint = () => {
       window.clearTimeout(dropHintTimer);
-      setDropActive(false);
+      hintState = null;
+      setDropHint(null);
     };
+
+    // Shift+drop means "take me there" — only offered when the host can resolve
+    // a folder AND the shell is at a prompt. Mid-command (or with a TUI running)
+    // a cd would just be typed into whatever has the terminal.
+    const canCd = (shift: boolean, hasFiles: boolean) =>
+      shift && hasFiles && !!propsRef.current.resolveDropDir && atShellPromptRef.current;
 
     const droppedPaths = (dt: DataTransfer | null): string[] => {
       const resolve = propsRef.current.getFilePath;
@@ -579,11 +606,16 @@ export function Terminal(props: TerminalProps) {
     // stopPropagation keeps the drag away from xterm's hidden textarea, which
     // (being a real textarea) would accept a text drag itself and insert it a
     // second time.
+    const quotePath = (p: string) => (PATH_NEEDS_QUOTES.test(p) ? `"${p}"` : p);
+
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-      showDropHint();
+      // dataTransfer.files is empty until the drop itself (by design), but
+      // `types` is readable — enough to know whether Shift would mean "cd" here.
+      const hasFiles = !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+      showDropHint(canCd(e.shiftKey, hasFiles) ? 'cd' : 'path', canCd(true, hasFiles));
     };
 
     const onDrop = (e: DragEvent) => {
@@ -591,10 +623,29 @@ export function Terminal(props: TerminalProps) {
       e.stopPropagation();
       hideDropHint();
       const paths = droppedPaths(e.dataTransfer);
+
+      // Shift+drop: go to the dropped folder (or the dropped file's folder) and
+      // run it, rather than inserting the path.
+      const toDir = propsRef.current.resolveDropDir;
+      if (paths.length && toDir && canCd(e.shiftKey, true)) {
+        void toDir(paths)
+          .then((dir) => {
+            if (!dir) return;
+            term.paste(`cd ${quotePath(dir)}`);
+            // The CR goes straight to the pty: inside a bracketed paste it would
+            // be inserted as a newline, not submitted.
+            markLineSubmitted();
+            ptyApi.write('\r');
+            term.focus();
+          })
+          .catch(() => undefined);
+        return;
+      }
+
       // No files? Fall back to dragged text (a selection or link from another
       // app) — same as dropping onto any other console.
       const text = paths.length
-        ? paths.map((p) => (PATH_NEEDS_QUOTES.test(p) ? `"${p}"` : p)).join(' ') + ' '
+        ? paths.map(quotePath).join(' ') + ' '
         : e.dataTransfer?.getData('text/plain') ?? '';
       if (!text) return;
       term.paste(text); // honors bracketed-paste mode
@@ -880,14 +931,21 @@ export function Terminal(props: TerminalProps) {
     (promptLine < navBuf.viewportY || promptLine >= navBuf.viewportY + term.rows);
 
   return (
-    <div className={`terminal-host${dropActive ? ' drop-active' : ''}`}>
+    <div className={`terminal-host${dropHint ? ' drop-active' : ''}`}>
       <div className="terminal-mount" ref={containerRef} />
       <ImageOverlay images={overlayImages} onRemove={removeImage} />
-      {dropActive && (
+      {dropHint && (
         // pointer-events: none (in CSS) — the overlay must never become the drag
         // target, or the drop would land on it instead of the terminal.
         <div className="term-drop">
-          <span className="term-drop-label">Drop to insert path</span>
+          <span className="term-drop-label">
+            {dropHint.mode === 'cd' ? 'Drop to go there' : 'Drop to insert path'}
+          </span>
+          {/* The only place Shift+drop is discoverable, so it's always shown
+              while a plain file drag is in progress and cd is possible. */}
+          {dropHint.mode === 'path' && dropHint.shiftable && (
+            <span className="term-drop-sub">hold Shift to cd there instead</span>
+          )}
         </div>
       )}
       {(scrolledUp || promptOffscreen) && (

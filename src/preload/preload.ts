@@ -57,6 +57,12 @@ const api: TermBridge = {
       return ''; // not a real filesystem file (e.g. a dragged browser image)
     }
   },
+  resolveDropDir(paths: string[]): Promise<string | null> {
+    return ipcRenderer.invoke(IPC.DROP_DIR, paths);
+  },
+  pickFolder(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC.PICK_FOLDER);
+  },
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC.APP_VERSION);
   },

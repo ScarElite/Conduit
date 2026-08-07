@@ -23,7 +23,8 @@ Windows Terminal is fine, but it isn't *mine*. Conduit is: live theme switching,
 - [x] Theme presets (Vlime, Holo, Green Classic, High-Contrast Light, Parchment) + user-saved themes, persisted across restarts (Phase 1)
 - [x] Inline image paste from the Windows Snipping Tool — anchored HTML overlay, click-to-enlarge (Phase 2)
 - [x] Optional audio ding on command completion via OSC 133 shell integration + BEL fallback (Phase 3)
-- [x] Drag & drop files onto the terminal to insert their paths, quoted when needed (conhost/Windows Terminal behavior)
+- [x] Drag & drop files onto the terminal to insert their paths, quoted when needed (conhost/Windows Terminal behavior); Shift+drop cd's there instead
+- [x] Shortcuts: type a name (e.g. `rf`) to jump to a folder and run a command — injected as PowerShell functions, no `$PROFILE` editing
 
 See **CONDUIT_HANDOFF.md** for the full architecture, phased build plan, and gotchas.
 
