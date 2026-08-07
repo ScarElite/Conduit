@@ -441,8 +441,9 @@ export function SettingsPanel(props: Props) {
               ＋ Add shortcut
             </button>
             <p className="hint">
-              New and edited shortcuts apply to tabs opened after the change — this
-              tab keeps the ones it started with.
+              Changes apply to every open tab as soon as you close this panel. A tab
+              that&apos;s busy (mid-command, or running something like Claude Code)
+              picks them up at its next prompt.
             </p>
           </section>
 

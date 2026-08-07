@@ -77,6 +77,14 @@ export interface TerminalProps {
   commands?: ConduitCommand[];
   /** True when this pane is the visible/active tab — triggers a refit + focus. */
   active?: boolean;
+  /**
+   * Bump this when the host changes something the SHELL reads (Conduit uses it
+   * for shortcuts). The terminal submits a bare Enter so the shell redraws its
+   * prompt and re-reads that config — but only at a fresh, empty prompt, where
+   * an Enter is harmless. A pane that's mid-line or running an app is left
+   * alone; it picks the change up at its own next prompt.
+   */
+  promptRefreshToken?: number;
 }
 
 interface PastedImage {
@@ -796,6 +804,17 @@ export function Terminal(props: TerminalProps) {
     });
     return () => cancelAnimationFrame(raf);
   }, [active]);
+
+  // ---- host asked the shell to re-read its config (see promptRefreshToken) ----
+  const skipFirstRefreshRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstRefreshRef.current) {
+      skipFirstRefreshRef.current = false;
+      return; // on mount the shell already started with the current config
+    }
+    if (!atShellPromptRef.current || !freshPromptRef.current) return;
+    propsRef.current.ptyApi.write('\r');
+  }, [props.promptRefreshToken]);
 
   // ---- find bar actions ----
   const runSearch = (query: string, mode: 'next' | 'prev' | 'incremental') => {

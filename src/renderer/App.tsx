@@ -262,6 +262,28 @@ export function App() {
     if (settings) window.term.setOpacity(settings.windowOpacity);
   }, [settings?.windowOpacity]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- shortcut edits reach shells that are already running ----
+  // Main writes the shortcut script on save and the shell re-sources it at each
+  // prompt — but a tab sitting at an ALREADY-DRAWN prompt hasn't run that check
+  // yet, so a brand-new shortcut would look like it doesn't exist until the next
+  // command. On panel close, nudge idle panes to redraw their prompt.
+  const [promptRefreshToken, setPromptRefreshToken] = useState(0);
+  const shortcutsAtOpenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!settings) return;
+    const current = JSON.stringify(settings.shortcuts ?? []);
+    if (panelOpen) {
+      shortcutsAtOpenRef.current = current;
+      return;
+    }
+    const before = shortcutsAtOpenRef.current;
+    shortcutsAtOpenRef.current = null;
+    if (before === null || before === current) return;
+    // Re-save before nudging: the last keystroke's save may still be in flight,
+    // and the shell must not re-read the file before main has rewritten it.
+    void window.term.saveSettings(settings).then(() => setPromptRefreshToken((n) => n + 1));
+  }, [panelOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Files dropped anywhere OUTSIDE a terminal pane (title bar, tab strip,
   // settings panel) are inert: Chromium's default is to navigate to the dropped
   // file, which would replace the whole UI with it. Main blocks the navigation
@@ -471,6 +493,7 @@ export function App() {
               <Terminal
                 ptyApi={getPtyApi(t.id)}
                 active={isActive}
+                promptRefreshToken={promptRefreshToken}
                 theme={activeTheme.xterm}
                 fontFamily={activeTheme.font.family}
                 fontSize={effectiveFontSize}

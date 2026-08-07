@@ -21,6 +21,7 @@ import {
   resizePty,
   killPty,
   killPtysForContents,
+  syncShortcutFile,
 } from './pty';
 import {
   getClipboardImage,
@@ -299,6 +300,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.SETTINGS_LOAD, () => loadSettings());
   ipcMain.handle(IPC.SETTINGS_SAVE, (_e, s: Settings) => {
     saveSettings(s);
+    // Rewrite the shortcut script here too: shells already running re-source it
+    // at their next prompt, so an edit doesn't wait for a new tab. Done before
+    // this handler resolves, so the renderer's prompt nudge can't outrun it.
+    syncShortcutFile(s.shortcuts ?? []);
   });
 
   // ---- pick a custom ding sound -> data URL ----
